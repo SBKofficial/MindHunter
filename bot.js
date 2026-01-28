@@ -71,7 +71,7 @@ bot.command('update', async (ctx) => {
             // Spawn a new Node.js process running the same file (bot.js)
             const subprocess = spawn(process.argv[0], process.argv.slice(1), {
                 detached: true, // Let it run even if parent dies
-                stdio: 'ignore' // Don't let them fight over the console
+                stdio: 'inherit' // Don't let them fight over the console
             });
 
             // Unlink the child from the parent
