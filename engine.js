@@ -11,7 +11,6 @@ const init = (bot) => { botInstance = bot; };
 // 📠 THE LOGGER FUNCTION
 const logEvent = (text) => {
     if (config.LOG_GROUP_ID && botInstance) {
-        // We use a try-catch to ensure logging never crashes the actual game
         botInstance.telegram.sendMessage(config.LOG_GROUP_ID, `📝 ${text}`).catch(e => console.log("Log Error:", e.message));
     }
 };
@@ -27,7 +26,6 @@ async function createLobby(ctx) {
     gameState.chatId = ctx.chat.id;
     gameState.creatorId = ctx.from.id; 
     
-    // LOG IT
     logEvent(`LOBBY CREATED\nUser: ${ctx.from.first_name}\nChat: ${ctx.chat.title} (${ctx.chat.id})`);
 
     const msg = await ctx.reply(
@@ -65,9 +63,7 @@ async function joinGame(ctx) {
         hasShield: false
     });
     
-    // LOG IT
     logEvent(`PLAYER JOINED\nName: ${ctx.from.first_name}\nTotal: ${gameState.players.length}`);
-
     ctx.answerCbQuery("Ledger Signed.");
     await ctx.telegram.sendMessage(gameState.chatId, ui.group.joined(ctx.from.first_name), { parse_mode: 'Markdown' });
 
@@ -107,9 +103,7 @@ async function listPlayers(ctx) {
     const requestor = state.getPlayer(ctx.from.id);
     if (!requestor) return ctx.reply(ui.list.denied, { parse_mode: 'Markdown' });
     
-    // Log confidential access
     logEvent(`REGISTRY CHECKED by ${ctx.from.first_name}`);
-    
     const playerList = gameState.players.map(p => ui.list.format(p)).join('\n');
     await ctx.reply(`${ui.list.header}\n\n${playerList}`, { parse_mode: 'Markdown' });
 }
@@ -121,9 +115,7 @@ async function handleKill(ctx) {
     const hunter = state.getPlayer(ctx.from.id);
     if (!hunter || !hunter.alive) return ctx.reply("You are dead/spectating.");
     
-    // Log intent
     logEvent(`KILL COMMAND INITIATED\nHunter: ${hunter.name}`);
-
     const buttons = gameState.players.filter(p => p.alive && p.id !== hunter.id).map(p => Markup.button.callback(`🔫 ${p.name}`, `shoot_${p.id}`));
     const keyboard = [];
     while (buttons.length > 0) keyboard.push(buttons.splice(0, 2)); 
@@ -138,7 +130,6 @@ async function handleShootAction(ctx) {
     if (Date.now() > hunter.killUnlockTime) return ctx.reply("🔒 Weapon Locked.");
 
     if (targetId !== hunter.targetId) {
-        // WRONG TARGET
         logEvent(`FAILED KILL (WRONG TARGET)\nHunter: ${hunter.name} -> Died.`);
         hunter.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.killFail(hunter.username), { parse_mode: 'Markdown' });
@@ -318,49 +309,151 @@ function startGameLoop(ctx) {
     }, config.CHECK_INTERVAL);
 }
 
-function startRouletteMode(ctx) {
+// ⚔️⚔️⚔️ NEW STANDOFF LOGIC ⚔️⚔️⚔️
+
+function startStandoffMode(ctx) {
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
-    gameState.status = "roulette"; 
+    
+    gameState.status = "standoff"; 
+    gameState.standoff.active = true;
+    gameState.standoff.round = 1;
+    gameState.standoff.moves = {};
+    gameState.standoff.lastMoves = {}; // Reset cooldowns
+
     const survivors = gameState.players.filter(p => p.alive);
-    logEvent(`ROULETTE MODE\nFinalists: ${survivors[0].name} vs ${survivors[1].name}`);
-    gameState.roulette.active = true;
-    gameState.roulette.chamber = 0;
-    gameState.roulette.bulletPosition = Math.floor(Math.random() * 6); 
-    gameState.roulette.turnId = survivors[0].id;
-    ctx.telegram.sendMessage(gameState.chatId, ui.roulette.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
-    startShotTimer(ctx);
+    logEvent(`STANDOFF START\n${survivors[0].name} vs ${survivors[1].name}`);
+    
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
+    initiateStandoffRound(ctx);
 }
 
-async function handleTrigger(ctx) {
-    if (gameState.status !== "roulette") return;
+function initiateStandoffRound(ctx) {
+    gameState.standoff.moves = {}; // Clear current moves
+    const survivors = gameState.players.filter(p => p.alive);
+    
+    // Send Round Start to Group
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(gameState.standoff.round), { parse_mode: 'Markdown' });
+
+    // Send Controls to DMs
+    survivors.forEach(p => {
+        const lastMove = gameState.standoff.lastMoves[p.id];
+        
+        // Disable the move they used last turn
+        const buttons = [
+            Markup.button.callback("🔥 SHOOT", "standoff_shoot", lastMove === 'shoot'),
+            Markup.button.callback("🛡️ DODGE", "standoff_dodge", lastMove === 'dodge'),
+            Markup.button.callback("🔋 RELOAD", "standoff_reload", lastMove === 'reload')
+        ];
+
+        // Send menu
+        botInstance.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, lastMove), { 
+            parse_mode: 'Markdown',
+            ...Markup.inlineKeyboard([buttons])
+        }).catch(e => {});
+    });
+
+    startStandoffTimer(ctx);
+}
+
+async function handleStandoffChoice(ctx) {
+    if (gameState.status !== "standoff") return ctx.answerCbQuery("Not active.");
+    
+    const move = ctx.match[0].replace('standoff_', '');
     const player = state.getPlayer(ctx.from.id);
-    if (!player || player.id !== gameState.roulette.turnId) return ctx.reply("Not your turn!");
-    if (gameState.roulette.shotTimer) clearTimeout(gameState.roulette.shotTimer);
-    if (gameState.roulette.chamber === gameState.roulette.bulletPosition) {
-        logEvent(`ROULETTE DEATH\nPlayer: ${player.name} got the bullet.`);
-        player.alive = false;
-        await ctx.reply(ui.roulette.bang(player.username), { parse_mode: 'Markdown' });
-        checkWinner(ctx);
-    } else {
-        logEvent(`ROULETTE CLICK\nPlayer: ${player.name} is safe.`);
-        gameState.roulette.chamber++;
-        const survivors = gameState.players.filter(p => p.alive);
-        const nextPlayer = survivors.find(p => p.id !== player.id);
-        gameState.roulette.turnId = nextPlayer.id;
-        await ctx.reply(ui.roulette.click(nextPlayer.username, 6 - gameState.roulette.chamber), { parse_mode: 'Markdown' });
-        startShotTimer(ctx);
+    
+    // Check if alive
+    if (!player || !player.alive) return ctx.answerCbQuery("You are dead.");
+
+    // Check Cooldown again (Security)
+    if (gameState.standoff.lastMoves[player.id] === move) {
+        return ctx.answerCbQuery(`❌ COOLDOWN! You just used ${move.toUpperCase()}. Pick another!`, { show_alert: true });
+    }
+
+    // Record Move
+    gameState.standoff.moves[player.id] = move;
+    ctx.answerCbQuery(`Selected: ${move.toUpperCase()}`);
+    ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*\nWaiting for opponent...`, { parse_mode: 'Markdown' });
+
+    // Check if both selected
+    const survivors = gameState.players.filter(p => p.alive);
+    const moves = gameState.standoff.moves;
+    
+    if (moves[survivors[0].id] && moves[survivors[1].id]) {
+        resolveStandoffRound(ctx);
     }
 }
 
-function startShotTimer(ctx) {
-    gameState.roulette.shotTimer = setTimeout(async () => {
-        if (gameState.status !== "roulette") return;
-        const coward = state.getPlayer(gameState.roulette.turnId);
-        if (coward && coward.alive) {
-            coward.alive = false;
-            logEvent(`ROULETTE TIMEOUT\nPlayer: ${coward.name} failed to pull trigger.`);
-            await ctx.telegram.sendMessage(gameState.chatId, `⏱️ Timeout! @${coward.username} died.`);
+function resolveStandoffRound(ctx) {
+    // Stop timers
+    clearTimeout(gameState.standoff.timer);
+    clearTimeout(gameState.standoff.reminderTimer);
+
+    const survivors = gameState.players.filter(p => p.alive);
+    const p1 = survivors[0];
+    const p2 = survivors[1];
+    const m1 = gameState.standoff.moves[p1.id];
+    const m2 = gameState.standoff.moves[p2.id];
+
+    let outcomeText = "";
+    let loser = null;
+
+    // Logic: Shoot > Reload > Dodge > Shoot
+    if (m1 === m2) {
+        outcomeText = "🤝 **DRAW** (Same Move)";
+    } else if (m1 === 'shoot' && m2 === 'reload') { outcomeText = "🔥 Player 1 Wins!"; loser = p2; }
+    else if (m1 === 'reload' && m2 === 'shoot') { outcomeText = "🔥 Player 2 Wins!"; loser = p1; }
+    
+    else if (m1 === 'dodge' && m2 === 'shoot') { outcomeText = "🛡️ Player 1 Counter-Attacks!"; loser = p2; }
+    else if (m1 === 'shoot' && m2 === 'dodge') { outcomeText = "🛡️ Player 2 Counter-Attacks!"; loser = p1; }
+    
+    else if (m1 === 'reload' && m2 === 'dodge') { outcomeText = "🔋 Player 1 Powers Up!"; loser = p2; }
+    else if (m1 === 'dodge' && m2 === 'reload') { outcomeText = "🔋 Player 2 Powers Up!"; loser = p1; }
+
+    logEvent(`STANDOFF ROUND ${gameState.standoff.round}\n${p1.name}: ${m1}\n${p2.name}: ${m2}\nResult: ${loser ? loser.name + " Died" : "Draw"}`);
+
+    // Announce Result
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.result(p1.username, m1, p2.username, m2, outcomeText), { parse_mode: 'Markdown' });
+
+    if (loser) {
+        loser.alive = false;
+        checkWinner(ctx);
+    } else {
+        // Draw -> Next Round
+        gameState.standoff.round++;
+        gameState.standoff.lastMoves = { ...gameState.standoff.moves }; // Set cooldowns
+        setTimeout(() => initiateStandoffRound(ctx), 3000); // 3s delay for suspense
+    }
+}
+
+function startStandoffTimer(ctx) {
+    // 15s Warning
+    gameState.standoff.reminderTimer = setTimeout(() => {
+        const survivors = gameState.players.filter(p => p.alive);
+        const slacker = survivors.find(p => !gameState.standoff.moves[p.id]);
+        if (slacker) {
+            ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(`@${slacker.username}`), { parse_mode: 'Markdown' });
+        }
+    }, 15000);
+
+    // 30s Kill
+    gameState.standoff.timer = setTimeout(() => {
+        const survivors = gameState.players.filter(p => p.alive);
+        const m1 = gameState.standoff.moves[survivors[0].id];
+        const m2 = gameState.standoff.moves[survivors[1].id];
+
+        if (!m1 && !m2) {
+            // Both idle? Everyone dies.
+            survivors.forEach(p => p.alive = false);
+            ctx.telegram.sendMessage(gameState.chatId, ui.standoff.timeout, { parse_mode: 'Markdown' });
+            checkWinner(ctx);
+        } else if (!m1) {
+            survivors[0].alive = false;
+            ctx.telegram.sendMessage(gameState.chatId, `💀 @${survivors[0].username} hesitated and died.`, { parse_mode: 'Markdown' });
+            checkWinner(ctx);
+        } else if (!m2) {
+            survivors[1].alive = false;
+            ctx.telegram.sendMessage(gameState.chatId, `💀 @${survivors[1].username} hesitated and died.`, { parse_mode: 'Markdown' });
             checkWinner(ctx);
         }
     }, 30000);
@@ -411,7 +504,7 @@ function startAnswerTimer(ctx) {
             
             const survivors = gameState.players.filter(pl => pl.alive);
             if (survivors.length <= 1) checkWinner(ctx);
-            else if (survivors.length === 2) startRouletteMode(ctx);
+            else if (survivors.length === 2) startStandoffMode(ctx);
             else nextTurn(ctx);
         }
     }, 1000);
@@ -420,7 +513,7 @@ function startAnswerTimer(ctx) {
 function handleDeathFlow(ctx, deadId, successfulHunter = null) {
     const survivors = gameState.players.filter(p => p.alive);
     if (survivors.length <= 1) { checkWinner(ctx); return; }
-    if (survivors.length === 2) { startRouletteMode(ctx); return; }
+    if (survivors.length === 2) { startStandoffMode(ctx); return; }
     repairChain(deadId, ctx, successfulHunter);
     if (gameState.turn.questionerId === deadId) {
         ctx.telegram.sendMessage(gameState.chatId, "🎤 Interrogator died.");
@@ -457,6 +550,6 @@ function checkWinner(ctx) {
 
 module.exports = {
     createLobby, joinGame, skipLobby, handleKill, handleShootAction, 
-    handleGuess, handleAccuse, handleText, handleTrigger, checkWinner, 
+    handleGuess, handleAccuse, handleText, handleStandoffChoice, checkWinner, 
     init, logEvent, getPlayer: state.getPlayer, listPlayers
 };
