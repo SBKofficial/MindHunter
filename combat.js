@@ -5,11 +5,13 @@ const logger = require('./logger');
 const game = require('./game'); 
 
 async function kill(ctx) {
-    if (ctx.chat.type !== 'private') return ctx.reply("❌ DM only.");
+    if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.kill_group, { parse_mode: 'Markdown' });
+    
     const gameState = state.getGameByPlayerId(ctx.from.id);
-    if (!gameState || gameState.status !== "active") return ctx.reply("⚠️ No active contract.");
+    if (!gameState || gameState.status !== "active") return ctx.reply(ui.report.idle, { parse_mode: 'Markdown' });
+    
     const hunter = state.getPlayer(gameState, ctx.from.id);
-    if (!hunter || !hunter.alive) return ctx.reply("You are retired.");
+    if (!hunter || !hunter.alive) return ctx.reply(ui.combat.kill_retired, { parse_mode: 'Markdown' });
 
     const buttons = gameState.players.filter(p => p.alive && p.id !== hunter.id).map(p => Markup.button.callback(`🔫 ${p.name}`, `shoot_${p.id}`));
     const keyboard = [];
@@ -25,7 +27,7 @@ async function shootAction(ctx) {
     if (!hunter || !hunter.alive) return ctx.answerCbQuery("Invalid.");
     
     ctx.deleteMessage();
-    if (Date.now() > hunter.killUnlockTime) return ctx.reply("🔒 Weapon Locked.");
+    if (Date.now() > hunter.killUnlockTime) return ctx.reply(ui.combat.kill_locked, { parse_mode: 'Markdown' });
 
     if (targetId !== hunter.targetId) {
         logger.log(`FAILED KILL\n${hunter.name} -> Died.`);
@@ -51,9 +53,11 @@ async function shootAction(ctx) {
 }
 
 async function guess(ctx) {
-    if (ctx.chat.type !== 'private') return ctx.reply("DM Only.");
+    if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.guess_group, { parse_mode: 'Markdown' });
+    
     const gameState = state.getGameByPlayerId(ctx.from.id);
-    if (!gameState || gameState.status !== "active") return ctx.reply("No active game.");
+    if (!gameState || gameState.status !== "active") return ctx.reply(ui.report.idle, { parse_mode: 'Markdown' });
+    
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player || !player.alive) return;
 
@@ -78,9 +82,11 @@ async function guess(ctx) {
 }
 
 async function accuse(ctx) {
-    if (ctx.chat.type === 'private') return;
+    if (ctx.chat.type === 'private') return ctx.reply(ui.accuse.dm, { parse_mode: 'Markdown' });
+    
     const gameState = state.getGame(ctx.chat.id);
-    if (!gameState || gameState.status !== "active") return;
+    if (!gameState || gameState.status !== "active") return ctx.reply(ui.accuse.idle, { parse_mode: 'Markdown' });
+    
     if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to suspect.");
     
     const accuser = state.getPlayer(gameState, ctx.from.id);
@@ -102,12 +108,13 @@ async function accuse(ctx) {
 }
 
 async function handleReport(ctx) {
-    if (ctx.chat.type === 'private') return;
+    if (ctx.chat.type === 'private') return ctx.reply(ui.report.dm, { parse_mode: 'Markdown' });
+    
     const gameState = state.getGame(ctx.chat.id);
-    if (!gameState || gameState.status !== "active") return;
+    if (!gameState || gameState.status !== "active") return ctx.reply(ui.report.idle, { parse_mode: 'Markdown' });
     
     const survivors = gameState.players.filter(p => p.alive).length;
-    if (survivors <= 2) return ctx.reply("⚠️ Reporting is disabled during the final duel. Fight like men.", { parse_mode: 'Markdown' });
+    if (survivors <= 2) return ctx.reply(ui.report.standoff, { parse_mode: 'Markdown' });
 
     if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to the inappropriate message.");
     const reporter = state.getPlayer(gameState, ctx.from.id);
