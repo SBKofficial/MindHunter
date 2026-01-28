@@ -18,12 +18,13 @@ const gameState = {
         timeLeft: 0,
         askTimer: null 
     },
-    roulette: {
+    // 👇 NEW STANDOFF STATE
+    standoff: {
         active: false,
-        turnId: null,      
-        chamber: 0,        
-        bulletPosition: 0,
-        shotTimer: null
+        round: 0,
+        timer: null,
+        reminderTimer: null,
+        moves: {} // Stores { playerId: "shoot"|"dodge"|"reload" }
     }
 };
 
@@ -35,7 +36,10 @@ const reset = () => {
     if (gameState.lobbyTimer) clearInterval(gameState.lobbyTimer);
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
-    if (gameState.roulette.shotTimer) clearTimeout(gameState.roulette.shotTimer);
+    
+    // Clear Standoff Timers
+    if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
+    if (gameState.standoff.reminderTimer) clearTimeout(gameState.standoff.reminderTimer);
 
     gameState.status = "idle";
     gameState.lobbyTimer = null;
@@ -45,7 +49,7 @@ const reset = () => {
     gameState.players = []; 
     
     gameState.turn = { active: false, playerIndex: 0, phase: "idle", questionerId: null, answeredIds: [], questionMessageId: null, timer: null, timeLeft: 0, askTimer: null };
-    gameState.roulette = { active: false, turnId: null, chamber: 0, bulletPosition: 0, shotTimer: null };
+    gameState.standoff = { active: false, round: 0, timer: null, reminderTimer: null, moves: {} };
     
     console.log("🔄 State Reset.");
 };
@@ -53,4 +57,4 @@ const reset = () => {
 module.exports = {
     gameState, getPlayer, getPlayerByName, getRandomWord, reset
 };
-
+    
