@@ -1,5 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
-const { exec } = require('child_process'); // <--- For Auto-Updates
+const { exec } = require('child_process'); 
 const config = require('./config');
 const engine = require('./engine'); 
 
@@ -9,6 +9,9 @@ engine.init(bot);
 
 // --- 👋 BASIC COMMANDS ---
 bot.start((ctx) => {
+    // LOG USAGE
+    engine.logEvent(`CMD: /start used by ${ctx.from.first_name} in ${ctx.chat.type}`);
+
     const botUser = ctx.botInfo.username; 
     ctx.reply(
         `🕵️‍♂️ *SYSTEM ONLINE*\n\n` +
@@ -27,6 +30,7 @@ bot.start((ctx) => {
 });
 
 bot.command(['rules', 'help'], (ctx) => {
+    engine.logEvent(`CMD: /rules used by ${ctx.from.first_name}`);
     ctx.reply(
         `📜 *RULES OF MIND HUNTER:*\n\n` +
         `1. *Kill:* Make target say Trap Word in Group -> /kill in DM.\n` +
@@ -41,8 +45,9 @@ bot.command(['rules', 'help'], (ctx) => {
 
 // --- 🔄 SYSTEM UPDATE COMMAND ---
 bot.command('update', async (ctx) => {
-    if (ctx.from.id !== config.OWNER_ID) return; // Silent fail for non-owners
+    if (ctx.from.id !== config.OWNER_ID) return; 
 
+    engine.logEvent(`CMD: /update used by OWNER.`);
     const msg = await ctx.reply("🔄 *CHECKING REPOSITORY...*", { parse_mode: 'Markdown' });
 
     exec('git pull', (err, stdout, stderr) => {
@@ -56,7 +61,7 @@ bot.command('update', async (ctx) => {
             `✅ *PATCH APPLIED*\n\nChanges:\n\`${stdout}\`\n\n🔄 *REBOOTING...*`, 
             { parse_mode: 'Markdown' }
         ).then(() => {
-            process.exit(0); // PM2 will restart the bot automatically
+            process.exit(0); 
         });
     });
 });
@@ -71,7 +76,10 @@ bot.command('guess', engine.handleGuess);
 bot.command('accuse', engine.handleAccuse);
 bot.command('trigger', engine.handleTrigger);
 bot.command('players', engine.listPlayers);
-bot.command('guide', (ctx) => ctx.reply(require('./ui').guide, { parse_mode: 'Markdown' }));
+bot.command('guide', (ctx) => {
+    engine.logEvent(`CMD: /guide used by ${ctx.from.first_name}`);
+    ctx.reply(require('./ui').guide, { parse_mode: 'Markdown' });
+});
 
 bot.command('exit', (ctx) => {
    ctx.reply("⚠️ To leave a lobby, just don't join! If the game started, you can go AFK to explode.");
@@ -82,9 +90,15 @@ bot.on('text', engine.handleText);
 
 // --- 🚀 LAUNCH ---
 console.log("⏳ Connecting to Telegram..."); 
-bot.catch((err) => console.log(`⚠️ Error: ${err.message}`));
-bot.launch().then(() => console.log('✅ Mind Hunter is Live!'));
+bot.catch((err) => {
+    console.log(`⚠️ Error: ${err.message}`);
+    engine.logEvent(`CRITICAL ERROR: ${err.message}`);
+});
+bot.launch().then(() => {
+    console.log('✅ Mind Hunter is Live!');
+    engine.logEvent(`🚀 SYSTEM STARTUP COMPLETE.`);
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-
+                                                
