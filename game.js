@@ -2,12 +2,11 @@ const config = require('./config');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-const combat = require('./combat'); // Circular dependency handled by function passing if needed
+const combat = require('./combat');
 
 async function start(ctx, gameState) {
     gameState.status = "active";
     logger.log(`GAME STARTED: ${gameState.chatId}`);
-    
     gameState.players.sort(() => Math.random() - 0.5);
     for (let i = 0; i < gameState.players.length; i++) {
         const hunter = gameState.players[i];
@@ -52,6 +51,7 @@ async function nextTurn(ctx, gameState) {
     gameState.turn.questionerId = gameState.players[idx].id;
     gameState.turn.phase = "ask_dm";
     gameState.turn.answeredIds = [];
+    gameState.turn.reports = new Map(); // 🧹 CLEAR REPORTS FOR NEW TURN
 
     await ctx.telegram.sendMessage(gameState.chatId, "🕵️ Next Turn...");
     try {
@@ -75,7 +75,6 @@ async function handleText(ctx, next) {
         }
         return next();
     }
-
     const gameState = state.getGame(ctx.chat.id);
     if (!gameState || gameState.status !== "active") return;
     const player = state.getPlayer(gameState, ctx.from.id);
@@ -93,7 +92,6 @@ async function handleText(ctx, next) {
             nextTurn(ctx, gameState);
         }
     }
-
     const hunter = gameState.players.find(p => p.targetId === player.id && p.alive);
     if (hunter && new RegExp(`\\b${hunter.trapWord}\\b`, 'i').test(ctx.message.text)) {
         hunter.killUnlockTime = Date.now() + (config.KILL_WINDOW_SECONDS * 1000);
@@ -134,8 +132,6 @@ function checkWinner(ctx, gameState) {
 function deathFlow(ctx, gameState, deadId, hunter = null) {
     const survivors = gameState.players.filter(p => p.alive);
     if (survivors.length <= 2) { checkWinner(ctx, gameState); return; }
-    
-    // Repair chain
     const deadGuy = state.getPlayer(gameState, deadId);
     const killer = gameState.players.find(p => p.targetId === deadId && p.alive);
     if (killer && deadGuy) {
