@@ -1,20 +1,24 @@
 const { Markup } = require('telegraf');
 
-// 🛡️ CRASH PREVENTER: Removes backticks only (Cyberpunk Style Names)
-const escape = (text) => text.replace(/`/g, '');
+// 🛡️ CRASH FIX: Escapes special Markdown characters
+// This fixes the "Bad Request: can't parse entities" error
+const escape = (text) => {
+    if (!text) return "Unknown";
+    return text.replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&');
+};
 
 module.exports = {
     // 🏠 LOBBY SYSTEM
     lobby: {
         text: (creator, time, players = []) => {
             const names = players.length > 0 
-                ? players.map(p => `• \`${escape(p.name)}\``).join('\n')
+                ? players.map(p => `• ${escape(p.name)}`).join('\n')
                 : "• (No associates yet)";
 
             return `🕯️ *THE CONTINENTAL*\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
             `*CONTRACT:* Open Bounty\n` +
-            `*CLIENT:* Mr. \`${escape(creator)}\`\n` +
+            `*CLIENT:* Mr. ${escape(creator)}\n` +
             `*STATUS:* Recruiting Associates...\n` +
             `⏳ *WINDOW:* ${time}s\n\n` +
             `*CURRENT ROSTER:*\n${names}\n\n` +
@@ -32,7 +36,7 @@ module.exports = {
         format: (p) => {
             let icon = p.alive ? "🤵" : "⚰️";
             if (p.hasShield) icon = "🧥"; 
-            return `${icon} \`${escape(p.name)}\``;
+            return `${icon} ${escape(p.name)}`;
         }
     },
 
@@ -42,7 +46,7 @@ module.exports = {
         mission: (target, word, afkTime) =>
             `📜 *NEW CONTRACT*\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
-            `🎯 *MARK:* \`${escape(target)}\`\n` +
+            `🎯 *MARK:* ${escape(target)}\n` +
             `🗝️ *METHOD:* \`${word.toUpperCase()}\`\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
             `*INSTRUCTIONS:*\n` +
@@ -62,10 +66,10 @@ module.exports = {
     // 📢 GROUP ALERTS
     group: {
         start: "🕯️ *BUSINESS HAS COMMENCED*\n\nContracts have been distributed.\nCheck your private channels.\n\n*Be seeing you.*",
-        joined: (name) => `🖋️ *NEW ASSOCIATE*\n\nMr. \`${escape(name)}\` has signed the ledger.`,
-        killSuccess: (target) => `🩸 *SERVED*\n\nThe contract on \`${escape(target)}\` has been fulfilled.`,
-        killFail: (hunter) => `🤡 *MESSY*\n\n\`${escape(hunter)}\` missed the shot and was retired by Management.`,
-        blocked: (target, hunter) => `🧥 *ARMORED*\n\n\`${escape(target)}\`'s Kevlar stopped the bullet from \`${escape(hunter)}\`.`,
+        joined: (name) => `🖋️ *NEW ASSOCIATE*\n\nMr. ${escape(name)} has signed the ledger.`,
+        killSuccess: (target) => `🩸 *SERVED*\n\nThe contract on ${escape(target)} has been fulfilled.`,
+        killFail: (hunter) => `🤡 *MESSY*\n\n${escape(hunter)} missed the shot and was retired by Management.`,
+        blocked: (target, hunter) => `🧥 *ARMORED*\n\n${escape(target)}'s Kevlar stopped the bullet from ${escape(hunter)}.`,
         question: (text) => 
             `❓ *INQUIRY*\n` +
             `▬▬▬▬▬▬▬▬▬▬▬\n` +
@@ -76,20 +80,20 @@ module.exports = {
         timerWarning: (seconds, mentions) => `⏳ *${seconds} SECONDS REMAINING*\n\nCOMPLY OR BE RETIRED:\n${mentions}`,
         reverseKill: (prey, hunter, word) =>
             `⚡ *COUNTER-MEASURE* ⚡\n\n` +
-            `\`${escape(prey)}\` anticipated the move by \`${escape(hunter)}\`.\n` +
+            `${escape(prey)} anticipated the move by ${escape(hunter)}.\n` +
             `*Method:* "${word}"\n` +
             `The Hunter has become the Hunted.`,
-        suicide: (player) => `💀 *RETIRED*\n\n\`${escape(player)}\` made a fatal calculation error.`,
-        afkDeath: (player) => `💥 *EXPIRED*\n\n\`${escape(player)}\` breached the "Proof of Life" protocol.`
+        suicide: (player) => `💀 *RETIRED*\n\n${escape(player)} made a fatal calculation error.`,
+        afkDeath: (player) => `💥 *EXPIRED*\n\n${escape(player)} breached the "Proof of Life" protocol.`
     },
 
-    // ⚔️ STANDOFF (NEW!)
+    // ⚔️ STANDOFF UI
     standoff: {
         intro: (p1, p2) => 
             `⚔️ *FINAL STANDOFF* ⚔️\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
             `The Table demands a victor.\n` +
-            `👉 \`${escape(p1)}\` vs \`${escape(p2)}\`\n\n` +
+            `👉 ${escape(p1)} vs ${escape(p2)}\n\n` +
             `*PROTOCOL:* Triangle of Death\n` +
             `🔥 *Shoot* kills Reload.\n` +
             `🛡️ *Dodge* beats Shoot.\n` +
@@ -111,15 +115,14 @@ module.exports = {
         result: (p1Name, p1Move, p2Name, p2Move, outcome) => 
             `💥 *STANDOFF RESULT*\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
-            `\`${escape(p1Name)}\`: ${p1Move.toUpperCase()}\n` +
-            `\`${escape(p2Name)}\`: ${p2Move.toUpperCase()}\n` +
+            `${escape(p1Name)}: ${p1Move.toUpperCase()}\n` +
+            `${escape(p2Name)}: ${p2Move.toUpperCase()}\n` +
             `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
             `*OUTCOME:* ${outcome}`
     },
 
-    victory: (winner) => `👑 *LAST MAN STANDING*\n\nMr. \`${escape(winner)}\` receives the Gold Coin.`,
+    victory: (winner) => `👑 *LAST MAN STANDING*\n\nMr. ${escape(winner)} receives the Gold Coin.`,
 
-    // 📘 GUIDE (Updated for Standoff)
     guide: 
         `💼 *OPERATIONAL BRIEFING*\n` +
         `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
@@ -141,4 +144,4 @@ module.exports = {
         `• *Timer:* 30s limit. Hesitation = Death.\n\n` +
         `*Prepare yourself.*`
 };
-            
+                
