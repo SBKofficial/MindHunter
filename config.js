@@ -2,6 +2,9 @@ module.exports = {
     // 👑 YOUR ADMIN ID (Get this from @userinfobot)
     OWNER_ID: 7708811819, // <--- REPLACE THIS WITH YOUR NUMERIC TELEGRAM ID
 
+    // 📠 LOG GROUP ID (New!) - Replace with your group's ID
+    LOG_GROUP_ID: -5178096636, 
+    
     // 🔑 YOUR BOT TOKEN
     BOT_TOKEN: '7689161380:AAFSNDnHJIqbE6rIlw5047_UZPsnFwvpXgU',
 
@@ -18,4 +21,3 @@ module.exports = {
         "really", "wait", "stop", "go", "ready", "done", "what"
     ]
 };
-
