@@ -1,7 +1,8 @@
 const { Telegraf, Markup } = require('telegraf');
 const { exec, spawn } = require('child_process'); 
 const config = require('./config');
-const engine = require('./engine'); 
+const engine = require('./engine');
+const ui = require('./ui'); // Need UI for start message
 
 const bot = new Telegraf(config.BOT_TOKEN);
 engine.init(bot);
@@ -9,9 +10,15 @@ engine.init(bot);
 bot.start((ctx) => {
     engine.logEvent(`CMD: /start used by ${ctx.from.first_name} in ${ctx.chat.type}`);
     const botUser = ctx.botInfo.username; 
-    ctx.reply(`🕵️‍♂️ *SYSTEM ONLINE*\n\nI am ready to infiltrate your group.\n\n👇 *MISSION PROTOCOL:*\n1. Add me to a Group Chat.\n2. Give me Admin permissions.\n3. Type */create* to open a lobby.`, { parse_mode: 'Markdown', ...Markup.inlineKeyboard([Markup.button.url("➕ Add to Group", `https://t.me/${botUser}?startgroup=true`)]) });
+    
+    if (ctx.chat.type === 'private') {
+        ctx.reply(ui.start.dm(botUser), { parse_mode: 'Markdown', ...Markup.inlineKeyboard([Markup.button.url("➕ Add to Group", `https://t.me/${botUser}?startgroup=true`)]) });
+    } else {
+        ctx.reply(ui.start.group, { parse_mode: 'Markdown' });
+    }
 });
 
+// ... rest of bot.js remains the same ...
 bot.command(['rules', 'help'], (ctx) => {
     engine.logEvent(`CMD: /rules used by ${ctx.from.first_name}`);
     ctx.reply(`📜 *RULES OF MIND HUNTER:*\n\n1. *Kill:* Make target say Trap Word in Group -> /kill in DM.\n2. *Survive:* Reply to Bot Questions in Group (2 mins).\n3. *Guess:* /guess @Hunter [word] in DM.\n4. *Report:* Reply to bad content with /report to vote execute.\n5. *Standoff:* Final 2 players enter a Duel.`, { parse_mode: 'Markdown' });
