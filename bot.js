@@ -1,5 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
-const { exec, spawn } = require('child_process'); // <--- Added 'spawn'
+const { exec, spawn } = require('child_process'); 
 const config = require('./config');
 const engine = require('./engine'); 
 
@@ -36,20 +36,18 @@ bot.command(['rules', 'help'], (ctx) => {
         `3. *Guess:* /guess @Hunter [word] in DM.\n` +
         `   • Correct = Hunter Dies ☠️\n` +
         `   • Wrong = You Die ☠️\n` +
-        `4. *Roulette:* Last 2 players? Type */trigger* or die.`,
+        `4. *Standoff:* Final 2 players enter a Duel (Shoot/Dodge/Reload).`,
         { parse_mode: 'Markdown' }
     );
 });
 
 // --- 🔄 SYSTEM SELF-UPDATE COMMAND ---
 bot.command('update', async (ctx) => {
-    // 1. Security Check
     if (ctx.from.id !== config.OWNER_ID) return; 
 
     engine.logEvent(`CMD: /update used by OWNER.`);
     const msg = await ctx.reply("🔄 *CHECKING REPOSITORY...*", { parse_mode: 'Markdown' });
 
-    // 2. Pull Code from GitHub
     exec('git pull', (err, stdout, stderr) => {
         if (err) {
             return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ *ERROR:*\n\`${err.message}\``, { parse_mode: 'Markdown' });
@@ -59,25 +57,16 @@ bot.command('update', async (ctx) => {
             return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ *SYSTEM OPTIMAL*\nNo new updates found.`, { parse_mode: 'Markdown' });
         }
 
-        // 3. Update Found - Notify User
         ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, 
             `✅ *PATCH APPLIED*\n\nChanges:\n\`${stdout}\`\n\n🔄 *RESTARTING SELF...*`, 
             { parse_mode: 'Markdown' }
         ).then(() => {
-            
-            // 4. THE MAGIC RESTART LOGIC 🪄
             console.log("🔄 Spawning new process...");
-            
-            // Spawn a new Node.js process running the same file (bot.js)
             const subprocess = spawn(process.argv[0], process.argv.slice(1), {
-                detached: true, // Let it run even if parent dies
-                stdio: 'inherit' // Don't let them fight over the console
+                detached: true, 
+                stdio: 'inherit' 
             });
-
-            // Unlink the child from the parent
             subprocess.unref();
-
-            // Kill the old (current) process
             process.exit();
         });
     });
@@ -89,9 +78,9 @@ bot.action('join_game', engine.joinGame);
 bot.command('skip', engine.skipLobby);
 bot.command('kill', engine.handleKill);
 bot.action(/^shoot_(\d+)$/, engine.handleShootAction);
+bot.action(/^standoff_/, engine.handleStandoffChoice); // 👈 NEW LISTENER
 bot.command('guess', engine.handleGuess);
 bot.command('accuse', engine.handleAccuse);
-bot.command('trigger', engine.handleTrigger);
 bot.command('players', engine.listPlayers);
 bot.command('guide', (ctx) => {
     engine.logEvent(`CMD: /guide used by ${ctx.from.first_name}`);
@@ -118,3 +107,4 @@ bot.launch().then(() => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
+         
