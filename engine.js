@@ -18,6 +18,8 @@ const listPlayers = async (ctx) => {
 
 module.exports = {
     init,
+    // 👇 THIS LINE FIXES THE "engine.logEvent is not a function" ERROR
+    logEvent: logger.log, 
     createLobby: lobby.create,
     joinGame: lobby.join,
     skipLobby: lobby.skip,
