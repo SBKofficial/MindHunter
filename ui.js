@@ -83,23 +83,43 @@ module.exports = {
         afkDeath: (player) => `💥 *EXPIRED*\n\n\`${escape(player)}\` breached the "Proof of Life" protocol.`
     },
 
-    // 🎰 ROULETTE
-    roulette: {
+    // ⚔️ STANDOFF (NEW!)
+    standoff: {
         intro: (p1, p2) => 
-            `⚖️ *FINAL JUDGMENT* ⚖️\n\n` +
-            `*PARTIES:* \`${escape(p1)}\` vs \`${escape(p2)}\`\n` +
-            `*PROTOCOL:* Standard Revolver (1 Round)\n\n` +
-            `👉 \`${escape(p1)}\`, you have the floor.\nType */trigger* (30s).`,
-        click: (nextPlayer, odds) => 
-            `💨 *CLICK...* (Empty)\n` +
-            `Fate spins the cylinder.\n\n` +
-            `👉 \`${escape(nextPlayer)}\`, your turn.\nType */trigger*\n` +
-            `*(Risk Factor: 1/${odds})*`,
-        bang: (player) => `🧨 *BANG!*\n\nMr. \`${escape(player)}\`'s membership has been revoked.`
+            `⚔️ *FINAL STANDOFF* ⚔️\n` +
+            `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
+            `The Table demands a victor.\n` +
+            `👉 \`${escape(p1)}\` vs \`${escape(p2)}\`\n\n` +
+            `*PROTOCOL:* Triangle of Death\n` +
+            `🔥 *Shoot* kills Reload.\n` +
+            `🛡️ *Dodge* beats Shoot.\n` +
+            `🔋 *Reload* beats Dodge.\n\n` +
+            `⚠️ *CHECK DAMS:* You have 30s to choose.`,
+        
+        roundStart: (round) => `🔔 *ROUND ${round} BEGINS*\nCheck your DMs. Choose your move.`,
+        
+        dmMenu: (round, disabledMove) => {
+            let text = `⚔️ *STANDOFF: ROUND ${round}*\n\nSelect your tactic.`;
+            if (disabledMove) text += `\n❌ *COOLDOWN:* You cannot use ${disabledMove.toUpperCase()} this turn.`;
+            return text;
+        },
+
+        reminder: (names) => `⏳ *THE TABLE GROWS IMPATIENT...*\n\n${names}\nYou have 15 seconds to choose, or you will be executed.`,
+
+        timeout: "💀 *HESITATION IS DEFEAT.*\n\nThose who did not choose have been executed.",
+
+        result: (p1Name, p1Move, p2Name, p2Move, outcome) => 
+            `💥 *STANDOFF RESULT*\n` +
+            `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
+            `\`${escape(p1Name)}\`: ${p1Move.toUpperCase()}\n` +
+            `\`${escape(p2Name)}\`: ${p2Move.toUpperCase()}\n` +
+            `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n` +
+            `*OUTCOME:* ${outcome}`
     },
+
     victory: (winner) => `👑 *LAST MAN STANDING*\n\nMr. \`${escape(winner)}\` receives the Gold Coin.`,
 
-    // 📘 GUIDE
+    // 📘 GUIDE (Updated for Standoff)
     guide: 
         `💼 *OPERATIONAL BRIEFING*\n` +
         `▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n\n` +
@@ -112,11 +132,13 @@ module.exports = {
         `• *Don't go AFK:* Speak every 120s.\n` +
         `• *Obey Orders:* Reply to Bot Questions immediately.\n` +
         `• *Counter-Attack:* Use */guess* in DM if you know your hunter.\n\n` +
-        `☠️ *WAYS TO DIE*\n` +
-        `• Saying your Trap Word.\n` +
-        `• Guessing wrong.\n` +
-        `• Missing an Interrogation Question.\n` +
-        `• Losing Russian Roulette.\n\n` +
+        `⚔️ *FINAL STANDOFF*\n` +
+        `The last 2 players enter a Duel.\n` +
+        `• 🔥 *Shoot* kills Reload.\n` +
+        `• 🛡️ *Dodge* beats Shoot.\n` +
+        `• 🔋 *Reload* beats Dodge.\n` +
+        `• *Cooldown:* You cannot use the same move twice in a row.\n` +
+        `• *Timer:* 30s limit. Hesitation = Death.\n\n` +
         `*Prepare yourself.*`
 };
-
+            
