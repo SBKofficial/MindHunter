@@ -2,7 +2,7 @@ const config = require('./config');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-const combat = require('./combat');
+// ❌ Removed global require('./combat') to fix circular dependency
 
 async function start(ctx, gameState) {
     gameState.status = "active";
@@ -51,7 +51,7 @@ async function nextTurn(ctx, gameState) {
     gameState.turn.questionerId = gameState.players[idx].id;
     gameState.turn.phase = "ask_dm";
     gameState.turn.answeredIds = [];
-    gameState.turn.reports = new Map(); // 🧹 CLEAR REPORTS FOR NEW TURN
+    gameState.turn.reports = new Map(); 
 
     await ctx.telegram.sendMessage(gameState.chatId, "🕵️ Next Turn...");
     try {
@@ -114,6 +114,8 @@ function startAnswerTimer(ctx, gameState) {
 }
 
 function checkWinner(ctx, gameState) {
+    const combat = require('./combat'); // 👈 LAZY LOAD (Fixes Crash)
+    
     const survivors = gameState.players.filter(p => p.alive);
     if (survivors.length === 1) {
         logger.log(`WINNER: ${survivors[0].name}`);
