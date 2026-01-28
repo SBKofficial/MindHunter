@@ -18,13 +18,14 @@ const gameState = {
         timeLeft: 0,
         askTimer: null 
     },
-    // 👇 NEW STANDOFF STATE
+    // 👇 NEW: STANDOFF STATE
     standoff: {
         active: false,
         round: 0,
         timer: null,
         reminderTimer: null,
-        moves: {} // Stores { playerId: "shoot"|"dodge"|"reload" }
+        moves: {},        // Stores current round choices: { playerId: 'shoot' }
+        lastMoves: {}     // Stores previous round choices (for Cooldowns)
     }
 };
 
@@ -49,7 +50,7 @@ const reset = () => {
     gameState.players = []; 
     
     gameState.turn = { active: false, playerIndex: 0, phase: "idle", questionerId: null, answeredIds: [], questionMessageId: null, timer: null, timeLeft: 0, askTimer: null };
-    gameState.standoff = { active: false, round: 0, timer: null, reminderTimer: null, moves: {} };
+    gameState.standoff = { active: false, round: 0, timer: null, reminderTimer: null, moves: {}, lastMoves: {} };
     
     console.log("🔄 State Reset.");
 };
@@ -57,4 +58,4 @@ const reset = () => {
 module.exports = {
     gameState, getPlayer, getPlayerByName, getRandomWord, reset
 };
-    
+        
