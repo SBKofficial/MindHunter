@@ -2,7 +2,7 @@ const { Markup } = require('telegraf');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-const game = require('./game'); 
+// ❌ Removed global require('./game') to fix circular dependency
 
 async function kill(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.kill_group, { parse_mode: 'Markdown' });
@@ -20,6 +20,8 @@ async function kill(ctx) {
 }
 
 async function shootAction(ctx) {
+    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState) return ctx.answerCbQuery("Game expired.");
     const targetId = parseInt(ctx.match[1]);
@@ -53,6 +55,8 @@ async function shootAction(ctx) {
 }
 
 async function guess(ctx) {
+    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+
     if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.guess_group, { parse_mode: 'Markdown' });
     
     const gameState = state.getGameByPlayerId(ctx.from.id);
@@ -82,6 +86,8 @@ async function guess(ctx) {
 }
 
 async function accuse(ctx) {
+    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+
     if (ctx.chat.type === 'private') return ctx.reply(ui.accuse.dm, { parse_mode: 'Markdown' });
     
     const gameState = state.getGame(ctx.chat.id);
@@ -108,6 +114,8 @@ async function accuse(ctx) {
 }
 
 async function handleReport(ctx) {
+    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+
     if (ctx.chat.type === 'private') return ctx.reply(ui.report.dm, { parse_mode: 'Markdown' });
     
     const gameState = state.getGame(ctx.chat.id);
@@ -180,6 +188,7 @@ function initStandoffRound(ctx, gameState) {
         if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 15000);
     gameState.standoff.timer = setTimeout(() => {
+        const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
         const s = gameState.players.filter(p=>p.alive);
         const m1 = gameState.standoff.moves[s[0].id], m2 = gameState.standoff.moves[s[1].id];
         if (!m1) s[0].alive = false;
@@ -207,6 +216,8 @@ async function standoffChoice(ctx) {
 function resolveStandoff(ctx, gameState) {
     clearTimeout(gameState.standoff.timer);
     clearTimeout(gameState.standoff.reminderTimer);
+    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+
     const [p1, p2] = gameState.players.filter(p => p.alive);
     const m1 = gameState.standoff.moves[p1.id], m2 = gameState.standoff.moves[p2.id];
     let outcome = "Draw", loser = null;
