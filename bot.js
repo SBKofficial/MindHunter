@@ -1,5 +1,5 @@
 const { Telegraf, Markup } = require('telegraf');
-const { exec } = require('child_process'); 
+const { exec, spawn } = require('child_process'); // <--- Added 'spawn'
 const config = require('./config');
 const engine = require('./engine'); 
 
@@ -9,9 +9,7 @@ engine.init(bot);
 
 // --- 👋 BASIC COMMANDS ---
 bot.start((ctx) => {
-    // LOG USAGE
     engine.logEvent(`CMD: /start used by ${ctx.from.first_name} in ${ctx.chat.type}`);
-
     const botUser = ctx.botInfo.username; 
     ctx.reply(
         `🕵️‍♂️ *SYSTEM ONLINE*\n\n` +
@@ -43,25 +41,44 @@ bot.command(['rules', 'help'], (ctx) => {
     );
 });
 
-// --- 🔄 SYSTEM UPDATE COMMAND ---
+// --- 🔄 SYSTEM SELF-UPDATE COMMAND ---
 bot.command('update', async (ctx) => {
+    // 1. Security Check
     if (ctx.from.id !== config.OWNER_ID) return; 
 
     engine.logEvent(`CMD: /update used by OWNER.`);
     const msg = await ctx.reply("🔄 *CHECKING REPOSITORY...*", { parse_mode: 'Markdown' });
 
+    // 2. Pull Code from GitHub
     exec('git pull', (err, stdout, stderr) => {
         if (err) {
             return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `❌ *ERROR:*\n\`${err.message}\``, { parse_mode: 'Markdown' });
         }
+
         if (stdout.includes('Already up to date')) {
             return ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, `✅ *SYSTEM OPTIMAL*\nNo new updates found.`, { parse_mode: 'Markdown' });
         }
+
+        // 3. Update Found - Notify User
         ctx.telegram.editMessageText(ctx.chat.id, msg.message_id, null, 
-            `✅ *PATCH APPLIED*\n\nChanges:\n\`${stdout}\`\n\n🔄 *REBOOTING...*`, 
+            `✅ *PATCH APPLIED*\n\nChanges:\n\`${stdout}\`\n\n🔄 *RESTARTING SELF...*`, 
             { parse_mode: 'Markdown' }
         ).then(() => {
-            process.exit(0); 
+            
+            // 4. THE MAGIC RESTART LOGIC 🪄
+            console.log("🔄 Spawning new process...");
+            
+            // Spawn a new Node.js process running the same file (bot.js)
+            const subprocess = spawn(process.argv[0], process.argv.slice(1), {
+                detached: true, // Let it run even if parent dies
+                stdio: 'ignore' // Don't let them fight over the console
+            });
+
+            // Unlink the child from the parent
+            subprocess.unref();
+
+            // Kill the old (current) process
+            process.exit();
         });
     });
 });
@@ -101,4 +118,3 @@ bot.launch().then(() => {
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
-                                                
