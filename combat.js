@@ -2,18 +2,16 @@ const { Markup } = require('telegraf');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-const game = require('./game'); // Needed for deathFlow
+const game = require('./game'); 
 
 async function kill(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply("❌ DM only.");
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState || gameState.status !== "active") return ctx.reply("⚠️ No active contract.");
-
     const hunter = state.getPlayer(gameState, ctx.from.id);
     if (!hunter || !hunter.alive) return ctx.reply("You are retired.");
 
-    const buttons = gameState.players.filter(p => p.alive && p.id !== hunter.id)
-        .map(p => Markup.button.callback(`🔫 ${p.name}`, `shoot_${p.id}`));
+    const buttons = gameState.players.filter(p => p.alive && p.id !== hunter.id).map(p => Markup.button.callback(`🔫 ${p.name}`, `shoot_${p.id}`));
     const keyboard = [];
     while (buttons.length > 0) keyboard.push(buttons.splice(0, 2));
     ctx.reply("🎯 *SELECT TARGET:*", { parse_mode: 'Markdown', ...Markup.inlineKeyboard(keyboard) });
@@ -22,7 +20,6 @@ async function kill(ctx) {
 async function shootAction(ctx) {
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState) return ctx.answerCbQuery("Game expired.");
-
     const targetId = parseInt(ctx.match[1]);
     const hunter = state.getPlayer(gameState, ctx.from.id);
     if (!hunter || !hunter.alive) return ctx.answerCbQuery("Invalid.");
@@ -57,18 +54,15 @@ async function guess(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply("DM Only.");
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState || gameState.status !== "active") return ctx.reply("No active game.");
-
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player || !player.alive) return;
 
     const args = ctx.message.text.split(' ');
     if (args.length < 3) return ctx.reply("Usage: /guess @Hunter [word]");
-
     const hunter = state.getPlayerByName(gameState, args[1]);
     const word = args[2].toLowerCase();
 
     if (!hunter || !hunter.alive) return ctx.reply("Invalid player.");
-
     if (hunter.targetId === player.id && hunter.trapWord.toLowerCase() === word) {
         hunter.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.reverseKill(player.username, hunter.username, word), { parse_mode: 'Markdown' });
@@ -88,13 +82,13 @@ async function accuse(ctx) {
     const gameState = state.getGame(ctx.chat.id);
     if (!gameState || gameState.status !== "active") return;
     if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to suspect.");
-
-    const survivors = gameState.players.filter(p => p.alive).length;
-    if (survivors < 5) return ctx.reply(`🛡️ **DISABLED!** Need 5+ players.`);
-
+    
     const accuser = state.getPlayer(gameState, ctx.from.id);
     const suspect = state.getPlayer(gameState, ctx.message.reply_to_message.from.id);
     if (!accuser?.alive || !suspect?.alive) return;
+
+    const survivors = gameState.players.filter(p => p.alive).length;
+    if (survivors < 5) return ctx.reply(`🛡️ **DISABLED!** Need 5+ players.`);
 
     if (suspect.targetId === accuser.id) {
         suspect.alive = false;
@@ -107,16 +101,57 @@ async function accuse(ctx) {
     }
 }
 
-// --- STANDOFF LOGIC ---
+async function handleReport(ctx) {
+    if (ctx.chat.type === 'private') return;
+    const gameState = state.getGame(ctx.chat.id);
+    if (!gameState || gameState.status !== "active") return;
+    
+    const survivors = gameState.players.filter(p => p.alive).length;
+    if (survivors <= 2) return ctx.reply("⚠️ Reporting is disabled during the final duel. Fight like men.", { parse_mode: 'Markdown' });
+
+    if (!ctx.message.reply_to_message) return ctx.reply("⚠️ Reply to the inappropriate message.");
+    const reporter = state.getPlayer(gameState, ctx.from.id);
+    if (!reporter || !reporter.alive) return;
+
+    let targetId = null;
+    const repliedMsg = ctx.message.reply_to_message;
+    if (repliedMsg.from.id === ctx.botInfo.id && repliedMsg.message_id === gameState.turn.questionMessageId) {
+        targetId = gameState.turn.questionerId;
+    } else {
+        targetId = repliedMsg.from.id;
+    }
+
+    const target = state.getPlayer(gameState, targetId);
+    if (!target || !target.alive) return ctx.reply(ui.report.invalid, { parse_mode: 'Markdown' });
+    if (target.id === reporter.id) return ctx.reply(ui.report.self);
+
+    if (!gameState.turn.reports.has(targetId)) gameState.turn.reports.set(targetId, new Set());
+    const votes = gameState.turn.reports.get(targetId);
+    if (votes.has(reporter.id)) return ctx.reply("⚠️ You already reported this.");
+    votes.add(reporter.id);
+
+    let votesNeeded = Math.ceil(survivors * 0.5); 
+    if (survivors === 3) votesNeeded = 2;
+
+    logger.log(`REPORT: ${reporter.name} reported ${target.name}. Votes: ${votes.size}/${votesNeeded}`);
+
+    if (votes.size >= votesNeeded) {
+        target.alive = false;
+        await ctx.telegram.sendMessage(gameState.chatId, ui.report.executed(target.username), { parse_mode: 'Markdown' });
+        gameState.turn.reports.clear();
+        game.deathFlow(ctx, gameState, target.id);
+    } else {
+        ctx.reply(ui.report.logged(target.username, votes.size, votesNeeded), { parse_mode: 'Markdown' });
+    }
+}
+
 function startStandoff(ctx, gameState) {
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     gameState.status = "standoff";
     gameState.standoff = { active: true, round: 1, moves: {}, lastMoves: {}, timer: null, reminderTimer: null };
-
     const survivors = gameState.players.filter(p => p.alive);
     logger.log(`STANDOFF: ${survivors[0].name} vs ${survivors[1].name}`);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
-    
     initStandoffRound(ctx, gameState);
 }
 
@@ -124,7 +159,6 @@ function initStandoffRound(ctx, gameState) {
     gameState.standoff.moves = {};
     const survivors = gameState.players.filter(p => p.alive);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(gameState.standoff.round), { parse_mode: 'Markdown' });
-
     survivors.forEach(p => {
         const last = gameState.standoff.lastMoves[p.id];
         const buttons = [
@@ -132,15 +166,12 @@ function initStandoffRound(ctx, gameState) {
             Markup.button.callback("🛡️ DODGE", "standoff_dodge", last === 'dodge'),
             Markup.button.callback("🔋 RELOAD", "standoff_reload", last === 'reload')
         ];
-        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), 
-            { parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) }).catch(e=>{});
+        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), { parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) }).catch(e=>{});
     });
-
     gameState.standoff.reminderTimer = setTimeout(() => {
         const slacker = gameState.players.filter(p=>p.alive).find(p => !gameState.standoff.moves[p.id]);
-        if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(`@${slacker.username}`), { parse_mode: 'Markdown' });
+        if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 15000);
-
     gameState.standoff.timer = setTimeout(() => {
         const s = gameState.players.filter(p=>p.alive);
         const m1 = gameState.standoff.moves[s[0].id], m2 = gameState.standoff.moves[s[1].id];
@@ -155,40 +186,30 @@ function initStandoffRound(ctx, gameState) {
 async function standoffChoice(ctx) {
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState || gameState.status !== "standoff") return ctx.answerCbQuery("Not active.");
-    
     const move = ctx.match[0].replace('standoff_', '');
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player?.alive) return ctx.answerCbQuery("Dead.");
-
     if (gameState.standoff.lastMoves[player.id] === move) return ctx.answerCbQuery("Cooldown!", { show_alert: true });
-
     gameState.standoff.moves[player.id] = move;
     ctx.answerCbQuery(`Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
-
     const survivors = gameState.players.filter(p => p.alive);
-    if (gameState.standoff.moves[survivors[0].id] && gameState.standoff.moves[survivors[1].id]) {
-        resolveStandoff(ctx, gameState);
-    }
+    if (gameState.standoff.moves[survivors[0].id] && gameState.standoff.moves[survivors[1].id]) resolveStandoff(ctx, gameState);
 }
 
 function resolveStandoff(ctx, gameState) {
     clearTimeout(gameState.standoff.timer);
     clearTimeout(gameState.standoff.reminderTimer);
-
     const [p1, p2] = gameState.players.filter(p => p.alive);
     const m1 = gameState.standoff.moves[p1.id], m2 = gameState.standoff.moves[p2.id];
     let outcome = "Draw", loser = null;
-
     if (m1 === m2) outcome = "🤝 DRAW";
     else if ((m1 === 'shoot' && m2 === 'reload') || (m1 === 'reload' && m2 === 'dodge') || (m1 === 'dodge' && m2 === 'shoot')) {
         outcome = `${m1 === 'shoot' ? '🔥' : m1 === 'reload' ? '🔋' : '🛡️'} ${p1.name} Wins!`; loser = p2;
     } else {
         outcome = `${m2 === 'shoot' ? '🔥' : m2 === 'reload' ? '🔋' : '🛡️'} ${p2.name} Wins!`; loser = p1;
     }
-
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.result(p1.username, m1, p2.username, m2, outcome), { parse_mode: 'Markdown' });
-
     if (loser) { loser.alive = false; game.checkWinner(ctx, gameState); }
     else {
         gameState.standoff.round++;
@@ -197,5 +218,4 @@ function resolveStandoff(ctx, gameState) {
     }
 }
 
-module.exports = { kill, shootAction, guess, accuse, standoffChoice, startStandoff };
-                                   
+module.exports = { kill, shootAction, guess, accuse, standoffChoice, startStandoff, handleReport };
