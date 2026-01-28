@@ -6,7 +6,6 @@ const ui = require('./ui');
 const logger = require('./logger');
 
 const init = (bot) => logger.init(bot);
-
 const listPlayers = async (ctx) => {
     if (ctx.chat.type === 'private') return ctx.reply("Group only.");
     const gameState = state.getGame(ctx.chat.id);
@@ -18,7 +17,6 @@ const listPlayers = async (ctx) => {
 
 module.exports = {
     init,
-    // 👇 THIS LINE FIXES THE "engine.logEvent is not a function" ERROR
     logEvent: logger.log, 
     createLobby: lobby.create,
     joinGame: lobby.join,
@@ -28,6 +26,7 @@ module.exports = {
     handleGuess: combat.guess,
     handleAccuse: combat.accuse,
     handleStandoffChoice: combat.standoffChoice,
+    handleReport: combat.handleReport,
     handleText: game.handleText,
     listPlayers
 };
