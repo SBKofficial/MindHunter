@@ -8,6 +8,14 @@ const gameState = state.gameState;
 
 const init = (bot) => { botInstance = bot; };
 
+// 📠 THE LOGGER FUNCTION
+const logEvent = (text) => {
+    if (config.LOG_GROUP_ID && botInstance) {
+        // We use a try-catch to ensure logging never crashes the actual game
+        botInstance.telegram.sendMessage(config.LOG_GROUP_ID, `📝 ${text}`).catch(e => console.log("Log Error:", e.message));
+    }
+};
+
 // --- 🎮 LOBBY SYSTEM ---
 async function createLobby(ctx) {
     if (gameState.status !== "idle") return ctx.reply("⚠️ Game running.");
@@ -19,6 +27,9 @@ async function createLobby(ctx) {
     gameState.chatId = ctx.chat.id;
     gameState.creatorId = ctx.from.id; 
     
+    // LOG IT
+    logEvent(`LOBBY CREATED\nUser: ${ctx.from.first_name}\nChat: ${ctx.chat.title} (${ctx.chat.id})`);
+
     const msg = await ctx.reply(
         ui.lobby.text(ctx.from.first_name, 120, []), 
         { parse_mode: 'Markdown', ...ui.lobby.keyboard }
@@ -54,6 +65,9 @@ async function joinGame(ctx) {
         hasShield: false
     });
     
+    // LOG IT
+    logEvent(`PLAYER JOINED\nName: ${ctx.from.first_name}\nTotal: ${gameState.players.length}`);
+
     ctx.answerCbQuery("Ledger Signed.");
     await ctx.telegram.sendMessage(gameState.chatId, ui.group.joined(ctx.from.first_name), { parse_mode: 'Markdown' });
 
@@ -72,6 +86,7 @@ async function skipLobby(ctx) {
     if (gameState.status !== "lobby") return ctx.reply("No lobby.");
     if (ctx.from.id !== gameState.creatorId) return ctx.reply("⛔ Creator only.");
     
+    logEvent(`LOBBY SKIPPED by Host.`);
     clearInterval(gameState.lobbyTimer); 
     try {
         await ctx.telegram.unpinChatMessage(gameState.chatId, { message_id: gameState.lobbyMessageId });
@@ -91,6 +106,10 @@ async function listPlayers(ctx) {
     if (gameState.status === "idle") return ctx.reply(ui.list.noGame, { parse_mode: 'Markdown' });
     const requestor = state.getPlayer(ctx.from.id);
     if (!requestor) return ctx.reply(ui.list.denied, { parse_mode: 'Markdown' });
+    
+    // Log confidential access
+    logEvent(`REGISTRY CHECKED by ${ctx.from.first_name}`);
+    
     const playerList = gameState.players.map(p => ui.list.format(p)).join('\n');
     await ctx.reply(`${ui.list.header}\n\n${playerList}`, { parse_mode: 'Markdown' });
 }
@@ -101,6 +120,10 @@ async function handleKill(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply("❌ DM only.");
     const hunter = state.getPlayer(ctx.from.id);
     if (!hunter || !hunter.alive) return ctx.reply("You are dead/spectating.");
+    
+    // Log intent
+    logEvent(`KILL COMMAND INITIATED\nHunter: ${hunter.name}`);
+
     const buttons = gameState.players.filter(p => p.alive && p.id !== hunter.id).map(p => Markup.button.callback(`🔫 ${p.name}`, `shoot_${p.id}`));
     const keyboard = [];
     while (buttons.length > 0) keyboard.push(buttons.splice(0, 2)); 
@@ -115,6 +138,8 @@ async function handleShootAction(ctx) {
     if (Date.now() > hunter.killUnlockTime) return ctx.reply("🔒 Weapon Locked.");
 
     if (targetId !== hunter.targetId) {
+        // WRONG TARGET
+        logEvent(`FAILED KILL (WRONG TARGET)\nHunter: ${hunter.name} -> Died.`);
         hunter.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.killFail(hunter.username), { parse_mode: 'Markdown' });
         ctx.reply("💀 You died.");
@@ -122,12 +147,14 @@ async function handleShootAction(ctx) {
     } else {
         const realTarget = state.getPlayer(targetId);
         if (realTarget.hasShield) {
+            logEvent(`BLOCKED KILL (SHIELD)\nHunter: ${hunter.name} -> Target: ${realTarget.name}`);
             realTarget.hasShield = false;
             await ctx.telegram.sendMessage(gameState.chatId, ui.group.blocked(realTarget.username, hunter.username), { parse_mode: 'Markdown' });
             ctx.reply("❌ *BLOCKED!* They had a shield.", { parse_mode: 'Markdown' });
             hunter.killUnlockTime = 0;
             return;
         }
+        logEvent(`SUCCESSFUL KILL\nHunter: ${hunter.name} -> Target: ${realTarget.name}`);
         realTarget.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.killSuccess(realTarget.username), { parse_mode: 'Markdown' });
         ctx.reply("🎯 Target Eliminated.");
@@ -146,12 +173,15 @@ async function handleGuess(ctx) {
     const word = args[2].toLowerCase();
     const hunter = state.getPlayerByName(hunterName);
     if (!hunter || !hunter.alive) return ctx.reply("Invalid player.");
+    
     if (hunter.targetId === player.id && hunter.trapWord.toLowerCase() === word) {
+        logEvent(`GUESS SUCCESS\nPrey: ${player.name} -> Killed Hunter: ${hunter.name}`);
         hunter.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.reverseKill(player.username, hunter.username, word), { parse_mode: 'Markdown' });
         ctx.reply(ui.dm.guessSuccess, { parse_mode: 'Markdown' });
         handleDeathFlow(ctx, hunter.id);
     } else {
+        logEvent(`GUESS FAIL\nPlayer: ${player.name} -> Died.`);
         player.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.group.suicide(player.username), { parse_mode: 'Markdown' });
         ctx.reply(ui.dm.guessFail, { parse_mode: 'Markdown' });
@@ -169,10 +199,12 @@ async function handleAccuse(ctx) {
     const suspect = state.getPlayer(suspectId);
     if (!accuser || !accuser.alive || !suspect || !suspect.alive) return;
     if (suspect.targetId === accuser.id) {
+        logEvent(`ACCUSATION SUCCESS\n${accuser.name} killed ${suspect.name}`);
         suspect.alive = false;
         await ctx.reply(`🛡️ *COUNTER!* @${accuser.username} killed assassin @${suspect.username}!`, { parse_mode: 'Markdown' });
         handleDeathFlow(ctx, suspect.id);
     } else {
+        logEvent(`ACCUSATION FAIL\n${accuser.name} was paranoid and died.`);
         accuser.alive = false;
         await ctx.reply(`🤪 *PARANOIA!* @${accuser.username} was wrong & died.`, { parse_mode: 'Markdown' });
         handleDeathFlow(ctx, accuser.id);
@@ -186,6 +218,7 @@ async function handleText(ctx, next) {
             if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
             gameState.turn.phase = "wait_group"; 
             await ctx.reply("✅ Sent!");
+            logEvent(`QUESTION ASKED\nBy: ${ctx.from.first_name}\nContent: "${ctx.message.text}"`);
             const sentMsg = await ctx.telegram.sendMessage(gameState.chatId, ui.group.question(ctx.message.text), { parse_mode: 'Markdown' });
             gameState.turn.questionMessageId = sentMsg.message_id;
             try { await ctx.telegram.pinChatMessage(gameState.chatId, sentMsg.message_id); } catch(e) {}
@@ -216,6 +249,7 @@ async function handleText(ctx, next) {
     if (hunter) {
         const regex = new RegExp(`\\b${hunter.trapWord}\\b`, 'i');
         if (regex.test(ctx.message.text)) {
+            logEvent(`TRAP WORD TRIGGERED\nPrey: ${player.name} said "${hunter.trapWord}"\nHunter Unlocked: ${hunter.name}`);
             hunter.killUnlockTime = Date.now() + (config.KILL_WINDOW_SECONDS * 1000);
             try { await ctx.telegram.sendMessage(hunter.id, ui.dm.locked(hunter.trapWord), { parse_mode: 'Markdown' }); } catch(e) {}
         }
@@ -248,6 +282,7 @@ async function startGame(ctx) {
         state.reset();
         return;
     }
+    logEvent(`GAME STARTED\nPlayers: ${gameState.players.map(p => p.name).join(', ')}`);
     gameState.status = "active";
     gameState.players.sort(() => Math.random() - 0.5);
     for (let i = 0; i < gameState.players.length; i++) {
@@ -275,6 +310,7 @@ function startGameLoop(ctx) {
             if (!p.alive) continue;
             if ((now - p.lastSeen) / 1000 > config.AFK_LIMIT_SECONDS) {
                 p.alive = false;
+                logEvent(`AFK DEATH\nPlayer: ${p.name} timed out.`);
                 await ctx.telegram.sendMessage(gameState.chatId, ui.group.afkDeath(p.username), { parse_mode: 'Markdown' });
                 handleDeathFlow(ctx, p.id);
             }
@@ -287,6 +323,7 @@ function startRouletteMode(ctx) {
     if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
     gameState.status = "roulette"; 
     const survivors = gameState.players.filter(p => p.alive);
+    logEvent(`ROULETTE MODE\nFinalists: ${survivors[0].name} vs ${survivors[1].name}`);
     gameState.roulette.active = true;
     gameState.roulette.chamber = 0;
     gameState.roulette.bulletPosition = Math.floor(Math.random() * 6); 
@@ -301,10 +338,12 @@ async function handleTrigger(ctx) {
     if (!player || player.id !== gameState.roulette.turnId) return ctx.reply("Not your turn!");
     if (gameState.roulette.shotTimer) clearTimeout(gameState.roulette.shotTimer);
     if (gameState.roulette.chamber === gameState.roulette.bulletPosition) {
+        logEvent(`ROULETTE DEATH\nPlayer: ${player.name} got the bullet.`);
         player.alive = false;
         await ctx.reply(ui.roulette.bang(player.username), { parse_mode: 'Markdown' });
         checkWinner(ctx);
     } else {
+        logEvent(`ROULETTE CLICK\nPlayer: ${player.name} is safe.`);
         gameState.roulette.chamber++;
         const survivors = gameState.players.filter(p => p.alive);
         const nextPlayer = survivors.find(p => p.id !== player.id);
@@ -320,6 +359,7 @@ function startShotTimer(ctx) {
         const coward = state.getPlayer(gameState.roulette.turnId);
         if (coward && coward.alive) {
             coward.alive = false;
+            logEvent(`ROULETTE TIMEOUT\nPlayer: ${coward.name} failed to pull trigger.`);
             await ctx.telegram.sendMessage(gameState.chatId, `⏱️ Timeout! @${coward.username} died.`);
             checkWinner(ctx);
         }
@@ -368,6 +408,7 @@ function startAnswerTimer(ctx) {
             clearInterval(gameState.turn.timer);
             const unanswered = gameState.players.filter(p => p.alive && !gameState.turn.answeredIds.includes(p.id));
             for (const p of unanswered) { p.alive = false; } 
+            
             const survivors = gameState.players.filter(pl => pl.alive);
             if (survivors.length <= 1) checkWinner(ctx);
             else if (survivors.length === 2) startRouletteMode(ctx);
@@ -404,9 +445,11 @@ async function repairChain(deadId, ctx, successfulHunter = null) {
 function checkWinner(ctx) {
     const survivors = gameState.players.filter(p => p.alive);
     if (survivors.length === 1) { 
+        logEvent(`GAME OVER\nWinner: ${survivors[0].name}`);
         ctx.telegram.sendMessage(gameState.chatId, ui.victory(survivors[0].username), { parse_mode: 'Markdown' }); 
         state.reset(); 
     } else if (survivors.length === 0) {
+        logEvent(`GAME OVER\nNo Survivors.`);
         ctx.telegram.sendMessage(gameState.chatId, "☠️ Game Over. Everyone died."); 
         state.reset();
     }
@@ -415,6 +458,5 @@ function checkWinner(ctx) {
 module.exports = {
     createLobby, joinGame, skipLobby, handleKill, handleShootAction, 
     handleGuess, handleAccuse, handleText, handleTrigger, checkWinner, 
-    init, getPlayer: state.getPlayer, listPlayers
+    init, logEvent, getPlayer: state.getPlayer, listPlayers
 };
-
