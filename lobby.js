@@ -8,10 +8,6 @@ async function create(ctx) {
     if (ctx.chat.type === 'private') return ctx.reply(ui.lobby.create_dm, { parse_mode: 'Markdown' });
     if (state.getGame(ctx.chat.id)) return ctx.reply(ui.lobby.create_active, { parse_mode: 'Markdown' });
     
-    // Warning if creator is in another game, but we let them start for now to avoid locking
-    // (Optional: You can uncomment next line to be strict)
-    // if (state.getGameByPlayerId(ctx.from.id)) return ctx.reply("⚠️ You are already in another contract.");
-
     const gameState = state.createGame(ctx.chat.id, ctx.from.id);
     logger.log(`LOBBY CREATED\nUser: ${ctx.from.first_name}\nChat: ${ctx.chat.title}`);
 
@@ -73,6 +69,12 @@ function startTimer(ctx, gameState) {
     let timeLeft = 120; 
     gameState.lobbyTimer = setInterval(() => {
         timeLeft--;
+        
+        // 👇 UPDATED: Reminders at 60, 30, 10
+        if (timeLeft === 60 || timeLeft === 30 || timeLeft === 10) {
+            ctx.telegram.sendMessage(gameState.chatId, ui.group.timer_warn(timeLeft), { parse_mode: 'Markdown' });
+        }
+
         if (timeLeft <= 0) {
             clearInterval(gameState.lobbyTimer);
             if (gameState.players.length < 3) {
