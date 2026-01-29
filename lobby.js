@@ -4,6 +4,15 @@ const ui = require('./ui');
 const logger = require('./logger');
 const game = require('./game'); 
 
+// 🛡️ Helper to safely answer callbacks
+const safeAnswer = async (ctx, text, alert = false) => {
+    try {
+        await ctx.answerCbQuery(text, { show_alert: alert });
+    } catch (e) {
+        // Ignore "query is too old" errors
+    }
+};
+
 async function create(ctx) {
     if (ctx.chat.type === 'private') return ctx.reply(ui.lobby.create_dm, { parse_mode: 'Markdown' });
     if (state.getGame(ctx.chat.id)) return ctx.reply(ui.lobby.create_active, { parse_mode: 'Markdown' });
@@ -21,25 +30,21 @@ async function create(ctx) {
 }
 
 async function join(ctx) {
-    // 1. Initial Check
     let gameState = state.getGame(ctx.chat.id);
-    if (!gameState || gameState.status !== "lobby") return ctx.answerCbQuery(ui.lobby.join_closed.replace(/\*/g, ''), { show_alert: true });
+    if (!gameState || gameState.status !== "lobby") return safeAnswer(ctx, ui.lobby.join_closed.replace(/\*/g, ''), true);
     
     const userId = ctx.from.id;
-    if (gameState.players.some(p => p.id === userId)) return ctx.answerCbQuery("Already joined!");
-    if (state.getGameByPlayerId(userId)) return ctx.answerCbQuery("🚫 You are already in another game!", { show_alert: true });
+    if (gameState.players.some(p => p.id === userId)) return safeAnswer(ctx, "Already joined!");
+    if (state.getGameByPlayerId(userId)) return safeAnswer(ctx, "🚫 You are already in another game!", true);
 
-    // 2. DM the User (Async - Yields Control)
     try { await ctx.telegram.sendMessage(userId, ui.dm.welcome, { parse_mode: 'Markdown' }); } 
-    catch (e) { return ctx.answerCbQuery("❌ Start bot in DM first!", { show_alert: true }); }
+    catch (e) { return safeAnswer(ctx, "❌ Start bot in DM first!", true); }
 
-    // 🛡️ RACE CONDITION FIX: Re-fetch Game State
     gameState = state.getGame(ctx.chat.id);
     if (!gameState || gameState.status !== "lobby") {
-        return ctx.answerCbQuery(ui.lobby.join_closed.replace(/\*/g, ''), { show_alert: true });
+        return safeAnswer(ctx, ui.lobby.join_closed.replace(/\*/g, ''), true);
     }
 
-    // 3. Commit to State
     state.addPlayerToDirectory(userId, gameState.chatId);
     gameState.players.push({
         id: userId, name: ctx.from.first_name, username: ctx.from.username || "Unknown",
@@ -47,7 +52,7 @@ async function join(ctx) {
     });
 
     logger.log(`PLAYER JOINED\nName: ${ctx.from.first_name}`);
-    ctx.answerCbQuery("Ledger Signed.");
+    await safeAnswer(ctx, "Ledger Signed.");
     await ctx.telegram.sendMessage(gameState.chatId, ui.group.joined(ctx.from.first_name), { parse_mode: 'Markdown' });
 
     try {
@@ -88,12 +93,10 @@ function startTimer(ctx, gameState) {
 
         if (timeLeft <= 0) {
             clearInterval(gameState.lobbyTimer);
-            
-            // 👇 NEW: CLEANUP LOBBY MESSAGE
             try { 
                 await ctx.telegram.unpinChatMessage(gameState.chatId, { message_id: gameState.lobbyMessageId });
                 await ctx.telegram.deleteMessage(gameState.chatId, gameState.lobbyMessageId);
-            } catch(e) {} // Ignore errors if message already deleted
+            } catch(e) {}
             
             if (gameState.players.length < 3) {
                  ctx.telegram.sendMessage(gameState.chatId, ui.lobby.insufficient, { parse_mode: 'Markdown' });
