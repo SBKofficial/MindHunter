@@ -160,10 +160,16 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
+    // 🛡️ SAFTEY: Force clear ALL active timers to prevent interference
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
+    if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
+    if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
+    if (gameState.standoff.reminderTimer) clearTimeout(gameState.standoff.reminderTimer);
+
     gameState.status = "standoff";
     gameState.standoff = { active: true, round: 1, moves: {}, lastMoves: {}, timer: null, reminderTimer: null };
     const survivors = gameState.players.filter(p => p.alive);
+    
     logger.log(`STANDOFF: ${survivors[0].name} vs ${survivors[1].name}`);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
     initStandoffRound(ctx, gameState);
@@ -173,30 +179,43 @@ function initStandoffRound(ctx, gameState) {
     gameState.standoff.moves = {};
     const survivors = gameState.players.filter(p => p.alive);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(gameState.standoff.round), { parse_mode: 'Markdown' });
-    survivors.forEach(p => {
-        const last = gameState.standoff.lastMoves[p.id];
-        const buttons = [
-            Markup.button.callback("🔥 SHOOT", "standoff_shoot", last === 'shoot'),
-            Markup.button.callback("🛡️ DODGE", "standoff_dodge", last === 'dodge'),
-            Markup.button.callback("🔋 RELOAD", "standoff_reload", last === 'reload')
-        ];
-        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), { parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) }).catch(e=>{});
-    });
     
-    // 👇 UPDATED: 10s Warning
+    survivors.forEach(p => {
+        const last = gameState.standoff.lastMoves[String(p.id)]; // Use String key
+        
+        const buttons = [
+            Markup.button.callback(last === 'shoot' ? "🚫 SHOOT" : "🔥 SHOOT", "standoff_shoot"),
+            Markup.button.callback(last === 'dodge' ? "🚫 DODGE" : "🛡️ DODGE", "standoff_dodge"),
+            Markup.button.callback(last === 'reload' ? "🚫 RELOAD" : "🔋 RELOAD", "standoff_reload")
+        ];
+
+        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), { 
+            parse_mode: 'Markdown', 
+            ...Markup.inlineKeyboard([buttons]) 
+        }).catch(e=>{});
+    });
+
     gameState.standoff.reminderTimer = setTimeout(() => {
-        const slacker = gameState.players.filter(p=>p.alive).find(p => !gameState.standoff.moves[p.id]);
+        const slacker = gameState.players.filter(p=>p.alive).find(p => !gameState.standoff.moves[String(p.id)]);
         if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
-    }, 20000); // 20s (so 10s remaining)
+    }, 20000);
 
     gameState.standoff.timer = setTimeout(() => {
         const game = require('./game'); 
         const s = gameState.players.filter(p=>p.alive);
-        const m1 = gameState.standoff.moves[s[0].id], m2 = gameState.standoff.moves[s[1].id];
+        
+        // 🛡️ KEY FIX: Convert IDs to Strings to ensure matching
+        const id1 = String(s[0].id);
+        const id2 = String(s[1].id);
+        const m1 = gameState.standoff.moves[id1];
+        const m2 = gameState.standoff.moves[id2];
+
         if (!m1) s[0].alive = false;
         if (!m2) s[1].alive = false;
+
         if (!m1 && !m2) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.timeout, { parse_mode: 'Markdown' });
         else if (!m1 || !m2) ctx.telegram.sendMessage(gameState.chatId, "💀 Hesitation is defeat.", { parse_mode: 'Markdown' });
+        
         game.checkWinner(ctx, gameState);
     }, 30000);
 }
@@ -204,15 +223,27 @@ function initStandoffRound(ctx, gameState) {
 async function standoffChoice(ctx) {
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState || gameState.status !== "standoff") return ctx.answerCbQuery("Not active.");
+    
     const move = ctx.match[0].replace('standoff_', '');
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player?.alive) return ctx.answerCbQuery("Dead.");
-    if (gameState.standoff.lastMoves[player.id] === move) return ctx.answerCbQuery("Cooldown!", { show_alert: true });
-    gameState.standoff.moves[player.id] = move;
+    
+    // 🛡️ KEY FIX: Use String ID
+    const pid = String(player.id);
+
+    if (gameState.standoff.lastMoves[pid] === move) {
+        return ctx.answerCbQuery(`❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, { show_alert: true });
+    }
+    
+    gameState.standoff.moves[pid] = move;
     ctx.answerCbQuery(`Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
+    
     const survivors = gameState.players.filter(p => p.alive);
-    if (gameState.standoff.moves[survivors[0].id] && gameState.standoff.moves[survivors[1].id]) resolveStandoff(ctx, gameState);
+    // Check if both moved
+    if (gameState.standoff.moves[String(survivors[0].id)] && gameState.standoff.moves[String(survivors[1].id)]) {
+        resolveStandoff(ctx, gameState);
+    }
 }
 
 function resolveStandoff(ctx, gameState) {
@@ -221,7 +252,9 @@ function resolveStandoff(ctx, gameState) {
     const game = require('./game'); 
 
     const [p1, p2] = gameState.players.filter(p => p.alive);
-    const m1 = gameState.standoff.moves[p1.id], m2 = gameState.standoff.moves[p2.id];
+    const m1 = gameState.standoff.moves[String(p1.id)];
+    const m2 = gameState.standoff.moves[String(p2.id)];
+    
     let outcome = "Draw", loser = null;
     if (m1 === m2) outcome = "🤝 DRAW";
     else if ((m1 === 'shoot' && m2 === 'reload') || (m1 === 'reload' && m2 === 'dodge') || (m1 === 'dodge' && m2 === 'shoot')) {
