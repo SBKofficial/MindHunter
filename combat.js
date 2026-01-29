@@ -111,7 +111,7 @@ async function accuse(ctx) {
         game.deathFlow(ctx, gameState, suspect.id);
     } else {
         accuser.alive = false;
-        await ctx.reply(`🤪 *PARANOIA!* @${accuser.username} was wrong & died.`, { parse_mode: 'Markdown' });
+        await ctx.reply(` *PARANOIA!* @${accuser.username} was wrong & died.`, { parse_mode: 'Markdown' });
         game.deathFlow(ctx, gameState, accuser.id);
     }
 }
