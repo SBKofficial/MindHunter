@@ -34,7 +34,6 @@ async function join(ctx) {
     catch (e) { return ctx.answerCbQuery("❌ Start bot in DM first!", { show_alert: true }); }
 
     // 🛡️ RACE CONDITION FIX: Re-fetch Game State
-    // The game might have been deleted (timer ended) while we were awaiting the DM above.
     gameState = state.getGame(ctx.chat.id);
     if (!gameState || gameState.status !== "lobby") {
         return ctx.answerCbQuery(ui.lobby.join_closed.replace(/\*/g, ''), { show_alert: true });
@@ -65,7 +64,10 @@ async function skip(ctx) {
     if (ctx.from.id !== gameState.creatorId) return ctx.reply(ui.lobby.skip_unauth, { parse_mode: 'Markdown' });
     
     clearInterval(gameState.lobbyTimer);
-    try { await ctx.telegram.unpinChatMessage(gameState.chatId, { message_id: gameState.lobbyMessageId }); } catch(e){}
+    try { 
+        await ctx.telegram.unpinChatMessage(gameState.chatId, { message_id: gameState.lobbyMessageId });
+        await ctx.telegram.deleteMessage(gameState.chatId, gameState.lobbyMessageId);
+    } catch(e){}
     
     if (gameState.players.length < 3) {
         ctx.reply(ui.lobby.insufficient, { parse_mode: 'Markdown' });
@@ -77,7 +79,7 @@ async function skip(ctx) {
 
 function startTimer(ctx, gameState) {
     let timeLeft = 120; 
-    gameState.lobbyTimer = setInterval(() => {
+    gameState.lobbyTimer = setInterval(async () => {
         timeLeft--;
         
         if (timeLeft === 60 || timeLeft === 30 || timeLeft === 10) {
@@ -86,6 +88,13 @@ function startTimer(ctx, gameState) {
 
         if (timeLeft <= 0) {
             clearInterval(gameState.lobbyTimer);
+            
+            // 👇 NEW: CLEANUP LOBBY MESSAGE
+            try { 
+                await ctx.telegram.unpinChatMessage(gameState.chatId, { message_id: gameState.lobbyMessageId });
+                await ctx.telegram.deleteMessage(gameState.chatId, gameState.lobbyMessageId);
+            } catch(e) {} // Ignore errors if message already deleted
+            
             if (gameState.players.length < 3) {
                  ctx.telegram.sendMessage(gameState.chatId, ui.lobby.insufficient, { parse_mode: 'Markdown' });
                  state.deleteGame(gameState.chatId);
