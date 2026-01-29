@@ -2,7 +2,7 @@ const { Telegraf, Markup } = require('telegraf');
 const { exec, spawn } = require('child_process'); 
 const config = require('./config');
 const engine = require('./engine');
-const ui = require('./ui'); // Need UI for start message
+const ui = require('./ui'); 
 
 const bot = new Telegraf(config.BOT_TOKEN);
 engine.init(bot);
@@ -18,7 +18,6 @@ bot.start((ctx) => {
     }
 });
 
-// ... rest of bot.js remains the same ...
 bot.command(['rules', 'help'], (ctx) => {
     engine.logEvent(`CMD: /rules used by ${ctx.from.first_name}`);
     ctx.reply(`📜 *RULES OF MIND HUNTER:*\n\n1. *Kill:* Make target say Trap Word in Group -> /kill in DM.\n2. *Survive:* Reply to Bot Questions in Group (2 mins).\n3. *Guess:* /guess @Hunter [word] in DM.\n4. *Report:* Reply to bad content with /report to vote execute.\n5. *Standoff:* Final 2 players enter a Duel.`, { parse_mode: 'Markdown' });
@@ -53,7 +52,21 @@ bot.command('exit', (ctx) => { ctx.reply("⚠️ To leave a lobby, just don't jo
 bot.on('text', engine.handleText);
 
 console.log("⏳ Connecting to Telegram..."); 
-bot.catch((err) => { console.log(`⚠️ Error: ${err.message}`); engine.logEvent(`CRITICAL ERROR: ${err.message}`); });
+
+// 🛡️ SUPERIOR ERROR HANDLING
+bot.catch((err, ctx) => {
+    const e = err.toString();
+    // Ignore common harmless errors to prevent log spam
+    if (e.includes("query is too old") || e.includes("message is not modified") || e.includes("message to edit not found")) {
+        return; 
+    }
+    console.error(`⚠️ Error: ${e}`);
+    try {
+        engine.logEvent(`CRITICAL ERROR: ${e}`);
+    } catch (logErr) {
+        console.error("Logger failed:", logErr);
+    }
+});
 
 bot.launch().then(async () => {
     console.log('✅ Mind Hunter is Live!');
@@ -72,6 +85,15 @@ bot.launch().then(async () => {
         ]);
         console.log("✅ Commands list updated.");
     } catch (e) { console.log("⚠️ Failed to update commands:", e.message); }
+});
+
+// Prevent Node.js from crashing on network timeout
+process.on('uncaughtException', (err) => {
+    console.log("🔥 Uncaught Exception:", err.message);
+    if(engine.logEvent) engine.logEvent(`🔥 UNCAUGHT EXCEPTION: ${err.message}`);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    console.log("🔥 Unhandled Rejection:", reason);
 });
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
