@@ -161,6 +161,7 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
+    // 🧹 SAFETY: Clear all previous timers to prevent double-firing
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
     if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
@@ -180,7 +181,7 @@ function startStandoff(ctx, gameState) {
 }
 
 function initStandoffRound(ctx, gameState) {
-    // 🧹 Clear moves for new round
+    // 🧹 Clear moves for new round (DIRECTLY ON PLAYERS)
     gameState.players.forEach(p => p.standoffMove = null);
     const roundNumber = gameState.standoff.round;
 
@@ -202,7 +203,9 @@ function initStandoffRound(ctx, gameState) {
     gameState.standoff.reminderTimer = setTimeout(() => {
         const freshState = state.getGame(gameState.chatId); 
         if (!freshState || freshState.standoff.round !== roundNumber) return;
-        const slacker = freshState.players.filter(p=>p.alive).find(p => !p.standoffMove); // Check prop
+        
+        // 🛡️ Check PLAYER PROPERTY
+        const slacker = freshState.players.filter(p=>p.alive).find(p => !p.standoffMove); 
         if (slacker) ctx.telegram.sendMessage(freshState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 20000);
 
@@ -242,7 +245,7 @@ async function standoffChoice(ctx) {
         return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
     }
     
-    // ✅ SAVE TO PLAYER OBJECT
+    // ✅ SAVE TO PLAYER OBJECT (NUCLEAR FIX)
     player.standoffMove = move;
     
     console.log(`[MOVE LOCKED] User: ${player.name} | Move: ${move}`);
