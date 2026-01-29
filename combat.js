@@ -3,6 +3,15 @@ const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
 
+// 🛡️ Helper to safely answer callbacks
+const safeAnswer = async (ctx, text, alert = false) => {
+    try {
+        await ctx.answerCbQuery(text, { show_alert: alert });
+    } catch (e) {
+        // Ignore "query is too old" errors
+    }
+};
+
 async function kill(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.kill_group, { parse_mode: 'Markdown' });
     
@@ -22,10 +31,10 @@ async function shootAction(ctx) {
     const game = require('./game'); 
     
     const gameState = state.getGameByPlayerId(ctx.from.id);
-    if (!gameState) return ctx.answerCbQuery("Game expired.");
+    if (!gameState) return safeAnswer(ctx, "Game expired.");
     const targetId = parseInt(ctx.match[1]);
     const hunter = state.getPlayer(gameState, ctx.from.id);
-    if (!hunter || !hunter.alive) return ctx.answerCbQuery("Invalid.");
+    if (!hunter || !hunter.alive) return safeAnswer(ctx, "Invalid.");
     
     ctx.deleteMessage();
     if (Date.now() > hunter.killUnlockTime) return ctx.reply(ui.combat.kill_locked, { parse_mode: 'Markdown' });
@@ -160,7 +169,6 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
-    // 🛡️ SAFTEY: Force clear ALL active timers to prevent interference
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
     if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
@@ -181,7 +189,7 @@ function initStandoffRound(ctx, gameState) {
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(gameState.standoff.round), { parse_mode: 'Markdown' });
     
     survivors.forEach(p => {
-        const last = gameState.standoff.lastMoves[String(p.id)]; // Use String key
+        const last = gameState.standoff.lastMoves[String(p.id)];
         
         const buttons = [
             Markup.button.callback(last === 'shoot' ? "🚫 SHOOT" : "🔥 SHOOT", "standoff_shoot"),
@@ -204,7 +212,6 @@ function initStandoffRound(ctx, gameState) {
         const game = require('./game'); 
         const s = gameState.players.filter(p=>p.alive);
         
-        // 🛡️ KEY FIX: Convert IDs to Strings to ensure matching
         const id1 = String(s[0].id);
         const id2 = String(s[1].id);
         const m1 = gameState.standoff.moves[id1];
@@ -222,25 +229,23 @@ function initStandoffRound(ctx, gameState) {
 
 async function standoffChoice(ctx) {
     const gameState = state.getGameByPlayerId(ctx.from.id);
-    if (!gameState || gameState.status !== "standoff") return ctx.answerCbQuery("Not active.");
+    if (!gameState || gameState.status !== "standoff") return safeAnswer(ctx, "Not active.");
     
     const move = ctx.match[0].replace('standoff_', '');
     const player = state.getPlayer(gameState, ctx.from.id);
-    if (!player?.alive) return ctx.answerCbQuery("Dead.");
+    if (!player?.alive) return safeAnswer(ctx, "Dead.");
     
-    // 🛡️ KEY FIX: Use String ID
     const pid = String(player.id);
 
     if (gameState.standoff.lastMoves[pid] === move) {
-        return ctx.answerCbQuery(`❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, { show_alert: true });
+        return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
     }
     
     gameState.standoff.moves[pid] = move;
-    ctx.answerCbQuery(`Selected: ${move}`);
+    await safeAnswer(ctx, `Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
     
     const survivors = gameState.players.filter(p => p.alive);
-    // Check if both moved
     if (gameState.standoff.moves[String(survivors[0].id)] && gameState.standoff.moves[String(survivors[1].id)]) {
         resolveStandoff(ctx, gameState);
     }
