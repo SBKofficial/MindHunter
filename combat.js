@@ -161,7 +161,6 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
-    // 🧹 SAFETY: Clear all previous timers to prevent double-firing
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
     if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
@@ -171,7 +170,7 @@ function startStandoff(ctx, gameState) {
     gameState.standoff = { active: true, round: 1, timer: null, reminderTimer: null };
     
     const survivors = gameState.players.filter(p => p.alive);
-    // 🛡️ RESET MOVES ON PLAYERS DIRECTLY
+    // 🛡️ RESET MOVES
     survivors.forEach(p => { p.standoffMove = null; p.lastStandoffMove = null; });
 
     logger.log(`STANDOFF STARTED: ${survivors[0].name} vs ${survivors[1].name}`);
@@ -181,7 +180,7 @@ function startStandoff(ctx, gameState) {
 }
 
 function initStandoffRound(ctx, gameState) {
-    // 🧹 Clear moves for new round (DIRECTLY ON PLAYERS)
+    // 🧹 Clear moves for new round
     gameState.players.forEach(p => p.standoffMove = null);
     const roundNumber = gameState.standoff.round;
 
@@ -200,15 +199,16 @@ function initStandoffRound(ctx, gameState) {
         }).catch(e=>{});
     });
 
+    // ⏳ WARNING TIMER
     gameState.standoff.reminderTimer = setTimeout(() => {
         const freshState = state.getGame(gameState.chatId); 
         if (!freshState || freshState.standoff.round !== roundNumber) return;
         
-        // 🛡️ Check PLAYER PROPERTY
         const slacker = freshState.players.filter(p=>p.alive).find(p => !p.standoffMove); 
         if (slacker) ctx.telegram.sendMessage(freshState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 20000);
 
+    // ☠️ EXECUTION TIMER
     gameState.standoff.timer = setTimeout(() => {
         const game = require('./game'); 
         const liveGame = state.getGame(gameState.chatId);
@@ -217,19 +217,25 @@ function initStandoffRound(ctx, gameState) {
         const s = liveGame.players.filter(p => p.alive);
         if (s.length < 2) return;
 
-        // 🛡️ READ DIRECTLY FROM PLAYER OBJECTS
-        const m1 = s[0].standoffMove;
-        const m2 = s[1].standoffMove;
+        let anyoneDied = false;
 
-        console.log(`[STANDOFF CHECK] Round: ${roundNumber} | P1(${s[0].name}): ${m1} | P2(${s[1].name}): ${m2}`);
+        // 🛡️ CHECK EACH PLAYER INDIVIDUALLY
+        s.forEach(p => {
+            console.log(`[TIMER CHECK] ${p.name}: Move=${p.standoffMove}`); // DEBUG LOG
+            if (!p.standoffMove) {
+                p.alive = false;
+                anyoneDied = true;
+            }
+        });
 
-        if (!m1) s[0].alive = false;
-        if (!m2) s[1].alive = false;
-
-        if (!m1 && !m2) ctx.telegram.sendMessage(liveGame.chatId, ui.standoff.timeout, { parse_mode: 'Markdown' });
-        else if (!m1 || !m2) ctx.telegram.sendMessage(liveGame.chatId, "💀 Hesitation is defeat.", { parse_mode: 'Markdown' });
-        
-        game.checkWinner(ctx, liveGame);
+        if (anyoneDied) {
+            ctx.telegram.sendMessage(liveGame.chatId, "💀 Hesitation is defeat.\nThose who did not choose have been executed.", { parse_mode: 'Markdown' });
+            game.checkWinner(ctx, liveGame);
+        } else {
+             // Should not happen if resolveStandoff triggers correctly, but failsafe:
+             ctx.telegram.sendMessage(liveGame.chatId, "⚠️ Error: Moves recorded but not resolved. Resetting round.");
+             initStandoffRound(ctx, liveGame);
+        }
     }, 30000);
 }
 
@@ -245,10 +251,11 @@ async function standoffChoice(ctx) {
         return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
     }
     
-    // ✅ SAVE TO PLAYER OBJECT (NUCLEAR FIX)
+    // ✅ SAVE TO PLAYER OBJECT
     player.standoffMove = move;
     
-    console.log(`[MOVE LOCKED] User: ${player.name} | Move: ${move}`);
+    // 📢 DEBUG LOG - Watch your console for this!
+    console.log(`[MOVE LOCKED] User: ${player.name} (${player.id}) | Move: ${move}`);
 
     await safeAnswer(ctx, `Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
@@ -268,6 +275,8 @@ function resolveStandoff(ctx, gameState) {
     const m1 = p1.standoffMove;
     const m2 = p2.standoffMove;
     
+    console.log(`[RESOLVING] ${p1.name}(${m1}) vs ${p2.name}(${m2})`);
+
     let outcome = "Draw", loser = null;
     if (m1 === m2) outcome = "🤝 DRAW";
     else if ((m1 === 'shoot' && m2 === 'reload') || (m1 === 'reload' && m2 === 'dodge') || (m1 === 'dodge' && m2 === 'shoot')) {
@@ -283,7 +292,6 @@ function resolveStandoff(ctx, gameState) {
         game.checkWinner(ctx, gameState); 
     } else {
         gameState.standoff.round++;
-        // Save history for cooldowns
         p1.lastStandoffMove = m1;
         p2.lastStandoffMove = m2;
         setTimeout(() => initStandoffRound(ctx, gameState), 3000);
