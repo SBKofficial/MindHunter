@@ -15,8 +15,6 @@ module.exports = {
         },
         keyboard: Markup.inlineKeyboard([Markup.button.callback("🖋️ Sign Ledger", "join_game")]),
         insufficient: `💼 *CONTRACT REVOKED*\n\nStandard protocols require a minimum of 3 associates.`,
-        
-        // 🚫 ERRORS
         create_dm: `⚠️ *RESTRICTED ACCESS*\nContracts must be opened on neutral ground (Group Chat).\n*We do not conduct business in the shadows.*`,
         create_active: `🚫 *ROOM OCCUPIED*\nA contract is already active in this sector.\n*Wait for the current business to conclude.*`,
         join_closed: `🔒 *CONTRACT SEALED*\nThe window for new associates has closed.\n*Be seeing you.*`,
@@ -54,12 +52,13 @@ module.exports = {
         killFail: (hunter) => `🤡 *MESSY*\n\n${escape(hunter)} missed the shot and was retired by Management.`,
         blocked: (target, hunter) => `🧥 *ARMORED*\n\n${escape(target)}'s Kevlar stopped the bullet from ${escape(hunter)}.`,
         question: (text) => `❓ *INQUIRY*\n▬▬▬▬▬▬▬▬▬▬▬\n"${escape(text)}"\n▬▬▬▬▬▬▬▬▬▬▬\n📢 *DIRECTIVE:* All associates must respond.\n⏳ *TIMER:* 2 Minutes`,
-        timerWarning: (seconds, mentions) => `⏳ *${seconds} SECONDS REMAINING*\n\nCOMPLY OR BE RETIRED:\n${mentions}`,
+        
+        // 👇 NEW GENERIC WARNING
+        timer_warn: (seconds, extra = "") => `⏳ *${seconds} SECONDS REMAINING*\nProtocol demands haste.${extra}`,
+        
         reverseKill: (prey, hunter, word) => `⚡ *COUNTER-MEASURE* ⚡\n\n${escape(prey)} anticipated the move by ${escape(hunter)}.\n*Method:* "${word}"\nThe Hunter has become the Hunted.`,
         suicide: (player) => `💀 *RETIRED*\n\n${escape(player)} made a fatal calculation error.`,
         afkDeath: (player) => `💥 *EXPIRED*\n\n${escape(player)} breached the "Proof of Life" protocol.`,
-        
-        // 👇 NEW MESSAGES
         askTimeout: (name) => `⌛ *TIME ELAPSED*\n\nInterrogator ${escape(name)} failed to question the suspects.\nThe Table has passed the turn.`,
         answerTimeout: (names) => `⚖️ *NON-COMPLIANCE*\n\nThe following associates refused to answer and have been executed:\n\n${names}`
     },
@@ -97,7 +96,7 @@ module.exports = {
             if (disabledMove) text += `\n❌ *COOLDOWN:* You cannot use ${disabledMove.toUpperCase()} this turn.`;
             return text;
         },
-        reminder: (username) => `⏳ *THE TABLE GROWS IMPATIENT...*\n\n@${escape(username)}\nYou have 15 seconds to choose, or you will be executed.`,
+        reminder: (username) => `⏳ *THE TABLE GROWS IMPATIENT...*\n\n@${escape(username)}\nYou have 10 seconds to choose, or you will be executed.`,
         timeout: "💀 *HESITATION IS DEFEAT.*\n\nThose who did not choose have been executed.",
         result: (p1Name, p1Move, p2Name, p2Move, outcome) => `💥 *STANDOFF RESULT*\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n${escape(p1Name)}: ${p1Move.toUpperCase()}\n${escape(p2Name)}: ${p2Move.toUpperCase()}\n▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬\n*OUTCOME:* ${outcome}`
     },
