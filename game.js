@@ -2,7 +2,6 @@ const config = require('./config');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-// ❌ Removed global require('./combat') to fix circular dependency
 
 async function start(ctx, gameState) {
     gameState.status = "active";
@@ -39,7 +38,7 @@ function startAFKLoop(ctx, gameState) {
 async function nextTurn(ctx, gameState) {
     if (gameState.status !== "active") return;
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
-    if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
+    if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer); // Changed to ClearInterval
 
     const alive = gameState.players.filter(p => p.alive);
     if (alive.length < 2) return;
@@ -57,16 +56,25 @@ async function nextTurn(ctx, gameState) {
     try {
         await ctx.telegram.sendMessage(gameState.turn.questionerId, ui.dm.yourTurnAsk, { parse_mode: 'Markdown' });
         
-        // ⏱️ ASK TIMER (60s)
-        gameState.turn.askTimer = setTimeout(async () => { 
-             if (gameState.turn.phase === "ask_dm") {
-                 // 📢 NOTIFY TIMEOUT
-                 const skipper = state.getPlayer(gameState, gameState.turn.questionerId);
-                 if (skipper) await ctx.telegram.sendMessage(gameState.chatId, ui.group.askTimeout(skipper.name), { parse_mode: 'Markdown' });
-                 
-                 nextTurn(ctx, gameState); 
-             }
-        }, 60000); 
+        // ⏱️ ASK TIMER (60s) - NOW WITH WARNINGS
+        let askTime = 60;
+        gameState.turn.askTimer = setInterval(async () => {
+            askTime--;
+            
+            // Warn Questioner in DM
+            if (askTime === 30 || askTime === 10) {
+                 await ctx.telegram.sendMessage(gameState.turn.questionerId, ui.group.timer_warn(askTime), { parse_mode: 'Markdown' }).catch(e=>{});
+            }
+
+            if (askTime <= 0) {
+                 clearInterval(gameState.turn.askTimer);
+                 if (gameState.turn.phase === "ask_dm") {
+                     const skipper = state.getPlayer(gameState, gameState.turn.questionerId);
+                     if (skipper) await ctx.telegram.sendMessage(gameState.chatId, ui.group.askTimeout(skipper.name), { parse_mode: 'Markdown' });
+                     nextTurn(ctx, gameState); 
+                 }
+            }
+        }, 1000); 
     } catch(e) { nextTurn(ctx, gameState); }
 }
 
@@ -75,7 +83,7 @@ async function handleText(ctx, next) {
         const gameState = state.getGameByPlayerId(ctx.from.id);
         if (gameState && gameState.status === "active" && gameState.turn.phase === "ask_dm" && ctx.from.id === gameState.turn.questionerId) {
             if (ctx.message.text.startsWith('/')) return next();
-            if (gameState.turn.askTimer) clearTimeout(gameState.turn.askTimer);
+            if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer); // Changed to ClearInterval
             gameState.turn.phase = "wait_group";
             await ctx.reply("✅ Sent!");
             const sent = await ctx.telegram.sendMessage(gameState.chatId, ui.group.question(ctx.message.text), { parse_mode: 'Markdown' });
@@ -115,30 +123,26 @@ function startAnswerTimer(ctx, gameState) {
         if (gameState.status !== "active") { clearInterval(gameState.turn.timer); return; }
         gameState.turn.timeLeft--;
         
-        if (gameState.turn.timeLeft === 30) await ctx.telegram.sendMessage(gameState.chatId, ui.group.timerWarning(30, "Everyone"), { parse_mode: 'Markdown' });
+        // 👇 UPDATED: Reminders at 60, 30, 10
+        if (gameState.turn.timeLeft === 60 || gameState.turn.timeLeft === 30 || gameState.turn.timeLeft === 10) {
+             await ctx.telegram.sendMessage(gameState.chatId, ui.group.timer_warn(gameState.turn.timeLeft, "\nRespond to the Inquiry."), { parse_mode: 'Markdown' });
+        }
         
         if (gameState.turn.timeLeft <= 0) {
             clearInterval(gameState.turn.timer);
-            
-            // 👇 IDENTIFY SLACKERS
             const slackingPlayers = gameState.players.filter(p => p.alive && !gameState.turn.answeredIds.includes(p.id));
-            
             if (slackingPlayers.length > 0) {
-                // 📢 NOTIFY EXECUTION
                 const names = slackingPlayers.map(p => `• ${p.name}`).join('\n');
                 await ctx.telegram.sendMessage(gameState.chatId, ui.group.answerTimeout(names), { parse_mode: 'Markdown' });
-                
-                // EXECUTE
                 slackingPlayers.forEach(p => p.alive = false);
             }
-            
             checkWinner(ctx, gameState);
         }
     }, 1000);
 }
 
 function checkWinner(ctx, gameState) {
-    const combat = require('./combat'); // 👈 LAZY LOAD (Fixes Crash)
+    const combat = require('./combat'); 
     
     const survivors = gameState.players.filter(p => p.alive);
     if (survivors.length === 1) {
