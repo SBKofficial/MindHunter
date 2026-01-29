@@ -161,16 +161,18 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
-    // 🧹 SAFETY: Clear all previous timers to prevent double-firing
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
     if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
     if (gameState.standoff.reminderTimer) clearTimeout(gameState.standoff.reminderTimer);
 
     gameState.status = "standoff";
-    gameState.standoff = { active: true, round: 1, moves: {}, lastMoves: {}, timer: null, reminderTimer: null };
+    gameState.standoff = { active: true, round: 1, timer: null, reminderTimer: null };
     
     const survivors = gameState.players.filter(p => p.alive);
+    // 🛡️ RESET MOVES ON PLAYERS DIRECTLY
+    survivors.forEach(p => { p.standoffMove = null; p.lastStandoffMove = null; });
+
     logger.log(`STANDOFF STARTED: ${survivors[0].name} vs ${survivors[1].name}`);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
     
@@ -178,15 +180,15 @@ function startStandoff(ctx, gameState) {
 }
 
 function initStandoffRound(ctx, gameState) {
-    // Reset moves for the new round
-    gameState.standoff.moves = {};
-    const roundNumber = gameState.standoff.round; // Capture round ID
+    // 🧹 Clear moves for new round
+    gameState.players.forEach(p => p.standoffMove = null);
+    const roundNumber = gameState.standoff.round;
 
     const survivors = gameState.players.filter(p => p.alive);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(roundNumber), { parse_mode: 'Markdown' });
     
     survivors.forEach(p => {
-        const last = gameState.standoff.lastMoves[String(p.id)];
+        const last = p.lastStandoffMove;
         const buttons = [
             Markup.button.callback(last === 'shoot' ? "🚫 SHOOT" : "🔥 SHOOT", "standoff_shoot"),
             Markup.button.callback(last === 'dodge' ? "🚫 DODGE" : "🛡️ DODGE", "standoff_dodge"),
@@ -197,35 +199,25 @@ function initStandoffRound(ctx, gameState) {
         }).catch(e=>{});
     });
 
-    // ⏳ REMINDER TIMER (20s)
     gameState.standoff.reminderTimer = setTimeout(() => {
-        // Fetch fresh state just in case
         const freshState = state.getGame(gameState.chatId); 
         if (!freshState || freshState.standoff.round !== roundNumber) return;
-
-        const slacker = freshState.players.filter(p=>p.alive).find(p => !freshState.standoff.moves[String(p.id)]);
+        const slacker = freshState.players.filter(p=>p.alive).find(p => !p.standoffMove); // Check prop
         if (slacker) ctx.telegram.sendMessage(freshState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 20000);
 
-    // ☠️ EXECUTION TIMER (30s)
     gameState.standoff.timer = setTimeout(() => {
         const game = require('./game'); 
-        
-        // 🔄 RE-FETCH GAME STATE: Critical to fix the "Lost Click" bug
-        // We ignore the 'gameState' passed in the closure and get the LIVE one from memory.
         const liveGame = state.getGame(gameState.chatId);
-        
-        if (!liveGame || liveGame.standoff.round !== roundNumber) return; // Round changed or game ended
+        if (!liveGame || liveGame.standoff.round !== roundNumber) return;
 
         const s = liveGame.players.filter(p => p.alive);
-        if (s.length < 2) return; // Already resolved
+        if (s.length < 2) return;
 
-        const id1 = String(s[0].id);
-        const id2 = String(s[1].id);
-        const m1 = liveGame.standoff.moves[id1];
-        const m2 = liveGame.standoff.moves[id2];
+        // 🛡️ READ DIRECTLY FROM PLAYER OBJECTS
+        const m1 = s[0].standoffMove;
+        const m2 = s[1].standoffMove;
 
-        // DEBUG LOG
         console.log(`[STANDOFF CHECK] Round: ${roundNumber} | P1(${s[0].name}): ${m1} | P2(${s[1].name}): ${m2}`);
 
         if (!m1) s[0].alive = false;
@@ -246,24 +238,20 @@ async function standoffChoice(ctx) {
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player?.alive) return safeAnswer(ctx, "Dead.");
     
-    // 🛡️ STRICT ID MATCHING: Force String Key
-    const pid = String(player.id);
-
-    if (gameState.standoff.lastMoves[pid] === move) {
+    if (player.lastStandoffMove === move) {
         return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
     }
     
-    // ✅ SAVE THE MOVE
-    gameState.standoff.moves[pid] = move;
+    // ✅ SAVE TO PLAYER OBJECT
+    player.standoffMove = move;
     
-    console.log(`[MOVE LOCKED] User: ${player.name} (${pid}) | Move: ${move}`); // Debug Log
+    console.log(`[MOVE LOCKED] User: ${player.name} | Move: ${move}`);
 
     await safeAnswer(ctx, `Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
     
-    // Check if opponent also moved
     const survivors = gameState.players.filter(p => p.alive);
-    if (gameState.standoff.moves[String(survivors[0].id)] && gameState.standoff.moves[String(survivors[1].id)]) {
+    if (survivors[0].standoffMove && survivors[1].standoffMove) {
         resolveStandoff(ctx, gameState);
     }
 }
@@ -274,8 +262,8 @@ function resolveStandoff(ctx, gameState) {
     const game = require('./game'); 
 
     const [p1, p2] = gameState.players.filter(p => p.alive);
-    const m1 = gameState.standoff.moves[String(p1.id)];
-    const m2 = gameState.standoff.moves[String(p2.id)];
+    const m1 = p1.standoffMove;
+    const m2 = p2.standoffMove;
     
     let outcome = "Draw", loser = null;
     if (m1 === m2) outcome = "🤝 DRAW";
@@ -292,7 +280,9 @@ function resolveStandoff(ctx, gameState) {
         game.checkWinner(ctx, gameState); 
     } else {
         gameState.standoff.round++;
-        gameState.standoff.lastMoves = { ...gameState.standoff.moves };
+        // Save history for cooldowns
+        p1.lastStandoffMove = m1;
+        p2.lastStandoffMove = m2;
         setTimeout(() => initStandoffRound(ctx, gameState), 3000);
     }
 }
