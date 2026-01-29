@@ -2,7 +2,6 @@ const { Markup } = require('telegraf');
 const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
-// ❌ Removed global require('./game') to fix circular dependency
 
 async function kill(ctx) {
     if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.kill_group, { parse_mode: 'Markdown' });
@@ -20,7 +19,7 @@ async function kill(ctx) {
 }
 
 async function shootAction(ctx) {
-    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    const game = require('./game'); 
     
     const gameState = state.getGameByPlayerId(ctx.from.id);
     if (!gameState) return ctx.answerCbQuery("Game expired.");
@@ -55,7 +54,7 @@ async function shootAction(ctx) {
 }
 
 async function guess(ctx) {
-    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    const game = require('./game'); 
 
     if (ctx.chat.type !== 'private') return ctx.reply(ui.combat.guess_group, { parse_mode: 'Markdown' });
     
@@ -86,7 +85,7 @@ async function guess(ctx) {
 }
 
 async function accuse(ctx) {
-    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    const game = require('./game'); 
 
     if (ctx.chat.type === 'private') return ctx.reply(ui.accuse.dm, { parse_mode: 'Markdown' });
     
@@ -114,7 +113,7 @@ async function accuse(ctx) {
 }
 
 async function handleReport(ctx) {
-    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    const game = require('./game'); 
 
     if (ctx.chat.type === 'private') return ctx.reply(ui.report.dm, { parse_mode: 'Markdown' });
     
@@ -183,12 +182,15 @@ function initStandoffRound(ctx, gameState) {
         ];
         ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), { parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) }).catch(e=>{});
     });
+    
+    // 👇 UPDATED: 10s Warning
     gameState.standoff.reminderTimer = setTimeout(() => {
         const slacker = gameState.players.filter(p=>p.alive).find(p => !gameState.standoff.moves[p.id]);
         if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
-    }, 15000);
+    }, 20000); // 20s (so 10s remaining)
+
     gameState.standoff.timer = setTimeout(() => {
-        const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+        const game = require('./game'); 
         const s = gameState.players.filter(p=>p.alive);
         const m1 = gameState.standoff.moves[s[0].id], m2 = gameState.standoff.moves[s[1].id];
         if (!m1) s[0].alive = false;
@@ -216,7 +218,7 @@ async function standoffChoice(ctx) {
 function resolveStandoff(ctx, gameState) {
     clearTimeout(gameState.standoff.timer);
     clearTimeout(gameState.standoff.reminderTimer);
-    const game = require('./game'); // 👈 LAZY LOAD (Fixes Crash)
+    const game = require('./game'); 
 
     const [p1, p2] = gameState.players.filter(p => p.alive);
     const m1 = gameState.standoff.moves[p1.id], m2 = gameState.standoff.moves[p2.id];
