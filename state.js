@@ -22,7 +22,7 @@ const createGame = (chatId, creatorId) => {
             timer: null,
             timeLeft: 0,
             askTimer: null,
-            reports: new Map() // 👈 NEW: Stores votes for this turn
+            reports: new Map() 
         },
         standoff: {
             active: false,
@@ -38,10 +38,25 @@ const createGame = (chatId, creatorId) => {
 };
 
 const getGame = (chatId) => games.get(chatId);
+
 const getGameByPlayerId = (userId) => {
     const chatId = playerDirectory.get(userId);
-    return chatId ? games.get(chatId) : null;
+    if (!chatId) return null;
+    
+    const game = games.get(chatId);
+    
+    // 🛡️ SELF-HEALING FIX:
+    // If directory says user is in a game, but that game doesn't exist anymore,
+    // clean up the trash so the user isn't "stuck".
+    if (!game) {
+        console.log(`🧹 Cleaning stuck player ${userId} from directory.`);
+        playerDirectory.delete(userId);
+        return null;
+    }
+    
+    return game;
 };
+
 const getPlayer = (game, userId) => game ? game.players.find(p => p.id === userId) : null;
 const getPlayerByName = (game, username) => {
     if (!username || !game) return null;
@@ -56,7 +71,7 @@ const deleteGame = (chatId) => {
     if (game) {
         if (game.lobbyTimer) clearInterval(game.lobbyTimer);
         if (game.turn.timer) clearInterval(game.turn.timer);
-        if (game.turn.askTimer) clearTimeout(game.turn.askTimer);
+        if (game.turn.askTimer) clearInterval(game.turn.askTimer);
         if (game.standoff.timer) clearTimeout(game.standoff.timer);
         if (game.standoff.reminderTimer) clearTimeout(game.standoff.reminderTimer);
         game.players.forEach(p => playerDirectory.delete(p.id));
