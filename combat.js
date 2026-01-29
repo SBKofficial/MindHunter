@@ -3,13 +3,9 @@ const state = require('./state');
 const ui = require('./ui');
 const logger = require('./logger');
 
-// 🛡️ Helper to safely answer callbacks
+// 🛡️ Safe Answer Helper
 const safeAnswer = async (ctx, text, alert = false) => {
-    try {
-        await ctx.answerCbQuery(text, { show_alert: alert });
-    } catch (e) {
-        // Ignore "query is too old" errors
-    }
+    try { await ctx.answerCbQuery(text, { show_alert: alert }); } catch (e) {}
 };
 
 async function kill(ctx) {
@@ -95,7 +91,6 @@ async function guess(ctx) {
 
 async function accuse(ctx) {
     const game = require('./game'); 
-
     if (ctx.chat.type === 'private') return ctx.reply(ui.accuse.dm, { parse_mode: 'Markdown' });
     
     const gameState = state.getGame(ctx.chat.id);
@@ -123,7 +118,6 @@ async function accuse(ctx) {
 
 async function handleReport(ctx) {
     const game = require('./game'); 
-
     if (ctx.chat.type === 'private') return ctx.reply(ui.report.dm, { parse_mode: 'Markdown' });
     
     const gameState = state.getGame(ctx.chat.id);
@@ -156,8 +150,6 @@ async function handleReport(ctx) {
     let votesNeeded = Math.ceil(survivors * 0.5); 
     if (survivors === 3) votesNeeded = 2;
 
-    logger.log(`REPORT: ${reporter.name} reported ${target.name}. Votes: ${votes.size}/${votesNeeded}`);
-
     if (votes.size >= votesNeeded) {
         target.alive = false;
         await ctx.telegram.sendMessage(gameState.chatId, ui.report.executed(target.username), { parse_mode: 'Markdown' });
@@ -169,6 +161,7 @@ async function handleReport(ctx) {
 }
 
 function startStandoff(ctx, gameState) {
+    // 🧹 SAFETY: Clear all previous timers to prevent double-firing
     if (gameState.turn.timer) clearInterval(gameState.turn.timer);
     if (gameState.turn.askTimer) clearInterval(gameState.turn.askTimer);
     if (gameState.standoff.timer) clearTimeout(gameState.standoff.timer);
@@ -176,54 +169,72 @@ function startStandoff(ctx, gameState) {
 
     gameState.status = "standoff";
     gameState.standoff = { active: true, round: 1, moves: {}, lastMoves: {}, timer: null, reminderTimer: null };
-    const survivors = gameState.players.filter(p => p.alive);
     
-    logger.log(`STANDOFF: ${survivors[0].name} vs ${survivors[1].name}`);
+    const survivors = gameState.players.filter(p => p.alive);
+    logger.log(`STANDOFF STARTED: ${survivors[0].name} vs ${survivors[1].name}`);
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
+    
     initStandoffRound(ctx, gameState);
 }
 
 function initStandoffRound(ctx, gameState) {
+    // Reset moves for the new round
     gameState.standoff.moves = {};
+    const roundNumber = gameState.standoff.round; // Capture round ID
+
     const survivors = gameState.players.filter(p => p.alive);
-    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(gameState.standoff.round), { parse_mode: 'Markdown' });
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(roundNumber), { parse_mode: 'Markdown' });
     
     survivors.forEach(p => {
         const last = gameState.standoff.lastMoves[String(p.id)];
-        
         const buttons = [
             Markup.button.callback(last === 'shoot' ? "🚫 SHOOT" : "🔥 SHOOT", "standoff_shoot"),
             Markup.button.callback(last === 'dodge' ? "🚫 DODGE" : "🛡️ DODGE", "standoff_dodge"),
             Markup.button.callback(last === 'reload' ? "🚫 RELOAD" : "🔋 RELOAD", "standoff_reload")
         ];
-
-        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(gameState.standoff.round, last), { 
-            parse_mode: 'Markdown', 
-            ...Markup.inlineKeyboard([buttons]) 
+        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(roundNumber, last), { 
+            parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) 
         }).catch(e=>{});
     });
 
+    // ⏳ REMINDER TIMER (20s)
     gameState.standoff.reminderTimer = setTimeout(() => {
-        const slacker = gameState.players.filter(p=>p.alive).find(p => !gameState.standoff.moves[String(p.id)]);
-        if (slacker) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
+        // Fetch fresh state just in case
+        const freshState = state.getGame(gameState.chatId); 
+        if (!freshState || freshState.standoff.round !== roundNumber) return;
+
+        const slacker = freshState.players.filter(p=>p.alive).find(p => !freshState.standoff.moves[String(p.id)]);
+        if (slacker) ctx.telegram.sendMessage(freshState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
     }, 20000);
 
+    // ☠️ EXECUTION TIMER (30s)
     gameState.standoff.timer = setTimeout(() => {
         const game = require('./game'); 
-        const s = gameState.players.filter(p=>p.alive);
         
+        // 🔄 RE-FETCH GAME STATE: Critical to fix the "Lost Click" bug
+        // We ignore the 'gameState' passed in the closure and get the LIVE one from memory.
+        const liveGame = state.getGame(gameState.chatId);
+        
+        if (!liveGame || liveGame.standoff.round !== roundNumber) return; // Round changed or game ended
+
+        const s = liveGame.players.filter(p => p.alive);
+        if (s.length < 2) return; // Already resolved
+
         const id1 = String(s[0].id);
         const id2 = String(s[1].id);
-        const m1 = gameState.standoff.moves[id1];
-        const m2 = gameState.standoff.moves[id2];
+        const m1 = liveGame.standoff.moves[id1];
+        const m2 = liveGame.standoff.moves[id2];
+
+        // DEBUG LOG
+        console.log(`[STANDOFF CHECK] Round: ${roundNumber} | P1(${s[0].name}): ${m1} | P2(${s[1].name}): ${m2}`);
 
         if (!m1) s[0].alive = false;
         if (!m2) s[1].alive = false;
 
-        if (!m1 && !m2) ctx.telegram.sendMessage(gameState.chatId, ui.standoff.timeout, { parse_mode: 'Markdown' });
-        else if (!m1 || !m2) ctx.telegram.sendMessage(gameState.chatId, "💀 Hesitation is defeat.", { parse_mode: 'Markdown' });
+        if (!m1 && !m2) ctx.telegram.sendMessage(liveGame.chatId, ui.standoff.timeout, { parse_mode: 'Markdown' });
+        else if (!m1 || !m2) ctx.telegram.sendMessage(liveGame.chatId, "💀 Hesitation is defeat.", { parse_mode: 'Markdown' });
         
-        game.checkWinner(ctx, gameState);
+        game.checkWinner(ctx, liveGame);
     }, 30000);
 }
 
@@ -235,16 +246,22 @@ async function standoffChoice(ctx) {
     const player = state.getPlayer(gameState, ctx.from.id);
     if (!player?.alive) return safeAnswer(ctx, "Dead.");
     
+    // 🛡️ STRICT ID MATCHING: Force String Key
     const pid = String(player.id);
 
     if (gameState.standoff.lastMoves[pid] === move) {
         return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
     }
     
+    // ✅ SAVE THE MOVE
     gameState.standoff.moves[pid] = move;
+    
+    console.log(`[MOVE LOCKED] User: ${player.name} (${pid}) | Move: ${move}`); // Debug Log
+
     await safeAnswer(ctx, `Selected: ${move}`);
     ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
     
+    // Check if opponent also moved
     const survivors = gameState.players.filter(p => p.alive);
     if (gameState.standoff.moves[String(survivors[0].id)] && gameState.standoff.moves[String(survivors[1].id)]) {
         resolveStandoff(ctx, gameState);
@@ -267,9 +284,13 @@ function resolveStandoff(ctx, gameState) {
     } else {
         outcome = `${m2 === 'shoot' ? '🔥' : m2 === 'reload' ? '🔋' : '🛡️'} ${p2.name} Wins!`; loser = p1;
     }
+    
     ctx.telegram.sendMessage(gameState.chatId, ui.standoff.result(p1.username, m1, p2.username, m2, outcome), { parse_mode: 'Markdown' });
-    if (loser) { loser.alive = false; game.checkWinner(ctx, gameState); }
-    else {
+    
+    if (loser) { 
+        loser.alive = false; 
+        game.checkWinner(ctx, gameState); 
+    } else {
         gameState.standoff.round++;
         gameState.standoff.lastMoves = { ...gameState.standoff.moves };
         setTimeout(() => initStandoffRound(ctx, gameState), 3000);
