@@ -28,9 +28,8 @@ const createGame = (chatId, creatorId) => {
             active: false,
             round: 0,
             timer: null,
-            reminderTimer: null,
-            moves: {},
-            lastMoves: {}
+            reminderTimer: null
+            // moves & lastMoves removed (Now stored on Player Objects)
         }
     };
     games.set(chatId, newGame);
@@ -46,8 +45,6 @@ const getGameByPlayerId = (userId) => {
     const game = games.get(chatId);
     
     // 🛡️ SELF-HEALING FIX:
-    // If directory says user is in a game, but that game doesn't exist anymore,
-    // clean up the trash so the user isn't "stuck".
     if (!game) {
         console.log(`🧹 Cleaning stuck player ${userId} from directory.`);
         playerDirectory.delete(userId);
