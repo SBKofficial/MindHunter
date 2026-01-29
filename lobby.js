@@ -21,16 +21,26 @@ async function create(ctx) {
 }
 
 async function join(ctx) {
-    const gameState = state.getGame(ctx.chat.id);
+    // 1. Initial Check
+    let gameState = state.getGame(ctx.chat.id);
     if (!gameState || gameState.status !== "lobby") return ctx.answerCbQuery(ui.lobby.join_closed.replace(/\*/g, ''), { show_alert: true });
     
     const userId = ctx.from.id;
     if (gameState.players.some(p => p.id === userId)) return ctx.answerCbQuery("Already joined!");
     if (state.getGameByPlayerId(userId)) return ctx.answerCbQuery("🚫 You are already in another game!", { show_alert: true });
 
+    // 2. DM the User (Async - Yields Control)
     try { await ctx.telegram.sendMessage(userId, ui.dm.welcome, { parse_mode: 'Markdown' }); } 
     catch (e) { return ctx.answerCbQuery("❌ Start bot in DM first!", { show_alert: true }); }
 
+    // 🛡️ RACE CONDITION FIX: Re-fetch Game State
+    // The game might have been deleted (timer ended) while we were awaiting the DM above.
+    gameState = state.getGame(ctx.chat.id);
+    if (!gameState || gameState.status !== "lobby") {
+        return ctx.answerCbQuery(ui.lobby.join_closed.replace(/\*/g, ''), { show_alert: true });
+    }
+
+    // 3. Commit to State
     state.addPlayerToDirectory(userId, gameState.chatId);
     gameState.players.push({
         id: userId, name: ctx.from.first_name, username: ctx.from.username || "Unknown",
@@ -70,7 +80,6 @@ function startTimer(ctx, gameState) {
     gameState.lobbyTimer = setInterval(() => {
         timeLeft--;
         
-        // 👇 UPDATED: Reminders at 60, 30, 10
         if (timeLeft === 60 || timeLeft === 30 || timeLeft === 10) {
             ctx.telegram.sendMessage(gameState.chatId, ui.group.timer_warn(timeLeft), { parse_mode: 'Markdown' });
         }
