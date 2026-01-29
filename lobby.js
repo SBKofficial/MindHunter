@@ -46,9 +46,20 @@ async function join(ctx) {
     }
 
     state.addPlayerToDirectory(userId, gameState.chatId);
+    
+    // 👇 UPDATED PLAYER STRUCTURE (Added Standoff props)
     gameState.players.push({
-        id: userId, name: ctx.from.first_name, username: ctx.from.username || "Unknown",
-        targetId: null, trapWord: null, killUnlockTime: 0, lastSeen: Date.now(), alive: true, hasShield: false
+        id: userId, 
+        name: ctx.from.first_name, 
+        username: ctx.from.username || "Unknown",
+        targetId: null, 
+        trapWord: null, 
+        killUnlockTime: 0, 
+        lastSeen: Date.now(), 
+        alive: true, 
+        hasShield: false,
+        standoffMove: null,      // New
+        lastStandoffMove: null   // New
     });
 
     logger.log(`PLAYER JOINED\nName: ${ctx.from.first_name}`);
