@@ -57,7 +57,11 @@ module.exports = {
         timerWarning: (seconds, mentions) => `⏳ *${seconds} SECONDS REMAINING*\n\nCOMPLY OR BE RETIRED:\n${mentions}`,
         reverseKill: (prey, hunter, word) => `⚡ *COUNTER-MEASURE* ⚡\n\n${escape(prey)} anticipated the move by ${escape(hunter)}.\n*Method:* "${word}"\nThe Hunter has become the Hunted.`,
         suicide: (player) => `💀 *RETIRED*\n\n${escape(player)} made a fatal calculation error.`,
-        afkDeath: (player) => `💥 *EXPIRED*\n\n${escape(player)} breached the "Proof of Life" protocol.`
+        afkDeath: (player) => `💥 *EXPIRED*\n\n${escape(player)} breached the "Proof of Life" protocol.`,
+        
+        // 👇 NEW MESSAGES
+        askTimeout: (name) => `⌛ *TIME ELAPSED*\n\nInterrogator ${escape(name)} failed to question the suspects.\nThe Table has passed the turn.`,
+        answerTimeout: (names) => `⚖️ *NON-COMPLIANCE*\n\nThe following associates refused to answer and have been executed:\n\n${names}`
     },
 
     // ⚔️ COMBAT ERRORS
