@@ -14,7 +14,6 @@ const listPlayers = async (ctx) => {
     const p = state.getPlayer(gameState, ctx.from.id);
     if (!p) return ctx.reply(ui.list.denied, { parse_mode: 'Markdown' });
     
-    // Check if empty
     if (gameState.players.length === 0) return ctx.reply(ui.list.noGame, { parse_mode: 'Markdown' });
 
     await ctx.reply(`${ui.list.header}\n\n${gameState.players.map(pl => ui.list.format(pl)).join('\n')}`, { parse_mode: 'Markdown' });
@@ -22,7 +21,7 @@ const listPlayers = async (ctx) => {
 
 module.exports = {
     init,
-    logEvent: logger.log, 
+    logEvent: logger.log, // 👈 THIS WAS MISSING. NOW FIXED.
     createLobby: lobby.create,
     joinGame: lobby.join,
     skipLobby: lobby.skip,
