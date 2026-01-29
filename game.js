@@ -56,7 +56,17 @@ async function nextTurn(ctx, gameState) {
     await ctx.telegram.sendMessage(gameState.chatId, "🕵️ Next Turn...");
     try {
         await ctx.telegram.sendMessage(gameState.turn.questionerId, ui.dm.yourTurnAsk, { parse_mode: 'Markdown' });
-        gameState.turn.askTimer = setTimeout(() => { if (gameState.turn.phase === "ask_dm") nextTurn(ctx, gameState); }, 60000);
+        
+        // ⏱️ ASK TIMER (60s)
+        gameState.turn.askTimer = setTimeout(async () => { 
+             if (gameState.turn.phase === "ask_dm") {
+                 // 📢 NOTIFY TIMEOUT
+                 const skipper = state.getPlayer(gameState, gameState.turn.questionerId);
+                 if (skipper) await ctx.telegram.sendMessage(gameState.chatId, ui.group.askTimeout(skipper.name), { parse_mode: 'Markdown' });
+                 
+                 nextTurn(ctx, gameState); 
+             }
+        }, 60000); 
     } catch(e) { nextTurn(ctx, gameState); }
 }
 
@@ -104,10 +114,24 @@ function startAnswerTimer(ctx, gameState) {
     gameState.turn.timer = setInterval(async () => {
         if (gameState.status !== "active") { clearInterval(gameState.turn.timer); return; }
         gameState.turn.timeLeft--;
+        
         if (gameState.turn.timeLeft === 30) await ctx.telegram.sendMessage(gameState.chatId, ui.group.timerWarning(30, "Everyone"), { parse_mode: 'Markdown' });
+        
         if (gameState.turn.timeLeft <= 0) {
             clearInterval(gameState.turn.timer);
-            gameState.players.filter(p => p.alive && !gameState.turn.answeredIds.includes(p.id)).forEach(p => p.alive = false);
+            
+            // 👇 IDENTIFY SLACKERS
+            const slackingPlayers = gameState.players.filter(p => p.alive && !gameState.turn.answeredIds.includes(p.id));
+            
+            if (slackingPlayers.length > 0) {
+                // 📢 NOTIFY EXECUTION
+                const names = slackingPlayers.map(p => `• ${p.name}`).join('\n');
+                await ctx.telegram.sendMessage(gameState.chatId, ui.group.answerTimeout(names), { parse_mode: 'Markdown' });
+                
+                // EXECUTE
+                slackingPlayers.forEach(p => p.alive = false);
+            }
+            
             checkWinner(ctx, gameState);
         }
     }, 1000);
