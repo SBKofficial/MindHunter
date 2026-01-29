@@ -170,4 +170,133 @@ function startStandoff(ctx, gameState) {
     gameState.standoff = { active: true, round: 1, timer: null, reminderTimer: null };
     
     const survivors = gameState.players.filter(p => p.alive);
-    //
+    // 🛡️ RESET MOVES
+    survivors.forEach(p => { p.standoffMove = null; p.lastStandoffMove = null; });
+
+    logger.log(`STANDOFF STARTED: ${survivors[0].name} vs ${survivors[1].name}`);
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.intro(survivors[0].username, survivors[1].username), { parse_mode: 'Markdown' });
+    
+    initStandoffRound(ctx, gameState);
+}
+
+function initStandoffRound(ctx, gameState) {
+    // 🧹 Clear moves for new round
+    gameState.players.forEach(p => p.standoffMove = null);
+    const roundNumber = gameState.standoff.round;
+
+    const survivors = gameState.players.filter(p => p.alive);
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.roundStart(roundNumber), { parse_mode: 'Markdown' });
+    
+    survivors.forEach(p => {
+        const last = p.lastStandoffMove;
+        const buttons = [
+            Markup.button.callback(last === 'shoot' ? "🚫 SHOOT" : "🔥 SHOOT", "standoff_shoot"),
+            Markup.button.callback(last === 'dodge' ? "🚫 DODGE" : "🛡️ DODGE", "standoff_dodge"),
+            Markup.button.callback(last === 'reload' ? "🚫 RELOAD" : "🔋 RELOAD", "standoff_reload")
+        ];
+        ctx.telegram.sendMessage(p.id, ui.standoff.dmMenu(roundNumber, last), { 
+            parse_mode: 'Markdown', ...Markup.inlineKeyboard([buttons]) 
+        }).catch(e=>{});
+    });
+
+    gameState.standoff.reminderTimer = setTimeout(() => {
+        const freshState = state.getGame(gameState.chatId); 
+        if (!freshState || freshState.standoff.round !== roundNumber) return;
+        
+        const slacker = freshState.players.filter(p=>p.alive).find(p => !p.standoffMove); 
+        if (slacker) ctx.telegram.sendMessage(freshState.chatId, ui.standoff.reminder(slacker.username), { parse_mode: 'Markdown' });
+    }, 20000);
+
+    gameState.standoff.timer = setTimeout(() => {
+        const game = require('./game'); 
+        const liveGame = state.getGame(gameState.chatId);
+        if (!liveGame || liveGame.standoff.round !== roundNumber) return;
+
+        const s = liveGame.players.filter(p => p.alive);
+        if (s.length < 2) return;
+
+        let anyoneDied = false;
+
+        // 🛡️ CHECK EACH PLAYER
+        s.forEach(p => {
+            console.log(`[TIMER CHECK] ${p.name}: Move=${p.standoffMove}`); // DEBUG LOG
+            if (!p.standoffMove) {
+                p.alive = false;
+                anyoneDied = true;
+            }
+        });
+
+        if (anyoneDied) {
+            ctx.telegram.sendMessage(liveGame.chatId, "💀 Hesitation is defeat.\nThose who did not choose have been executed.", { parse_mode: 'Markdown' });
+            game.checkWinner(ctx, liveGame);
+        } else {
+             // Failsafe: If no one died but moves weren't resolved for some reason
+             ctx.telegram.sendMessage(liveGame.chatId, "⚠️ Error: Moves recorded but not resolved. Resetting round.");
+             initStandoffRound(ctx, liveGame);
+        }
+    }, 30000);
+}
+
+async function standoffChoice(ctx) {
+    const gameState = state.getGameByPlayerId(ctx.from.id);
+    if (!gameState || gameState.status !== "standoff") return safeAnswer(ctx, "Not active.");
+    
+    // 🛡️ CRITICAL FIX: Use 'ctx.callbackQuery.data' directly
+    // Using 'ctx.match' was returning truncated data.
+    const fullData = ctx.callbackQuery.data; 
+    const move = fullData.replace('standoff_', '');
+    
+    const player = state.getPlayer(gameState, ctx.from.id);
+    if (!player?.alive) return safeAnswer(ctx, "Dead.");
+    
+    if (player.lastStandoffMove === move) {
+        return safeAnswer(ctx, `❌ COOLDOWN: You cannot use ${move.toUpperCase()} again!`, true);
+    }
+    
+    player.standoffMove = move;
+    
+    // 📢 DEBUG LOG - You should see the Move NAME here now, not empty!
+    console.log(`[MOVE LOCKED] User: ${player.name} (${player.id}) | Move: ${move}`);
+
+    await safeAnswer(ctx, `Selected: ${move}`);
+    ctx.editMessageText(`✅ LOCKED IN: *${move.toUpperCase()}*`, { parse_mode: 'Markdown' });
+    
+    const survivors = gameState.players.filter(p => p.alive);
+    if (survivors[0].standoffMove && survivors[1].standoffMove) {
+        resolveStandoff(ctx, gameState);
+    }
+}
+
+function resolveStandoff(ctx, gameState) {
+    clearTimeout(gameState.standoff.timer);
+    clearTimeout(gameState.standoff.reminderTimer);
+    const game = require('./game'); 
+
+    const [p1, p2] = gameState.players.filter(p => p.alive);
+    const m1 = p1.standoffMove;
+    const m2 = p2.standoffMove;
+    
+    console.log(`[RESOLVING] ${p1.name}(${m1}) vs ${p2.name}(${m2})`);
+
+    let outcome = "Draw", loser = null;
+    if (m1 === m2) outcome = "🤝 DRAW";
+    else if ((m1 === 'shoot' && m2 === 'reload') || (m1 === 'reload' && m2 === 'dodge') || (m1 === 'dodge' && m2 === 'shoot')) {
+        outcome = `${m1 === 'shoot' ? '🔥' : m1 === 'reload' ? '🔋' : '🛡️'} ${p1.name} Wins!`; loser = p2;
+    } else {
+        outcome = `${m2 === 'shoot' ? '🔥' : m2 === 'reload' ? '🔋' : '🛡️'} ${p2.name} Wins!`; loser = p1;
+    }
+    
+    ctx.telegram.sendMessage(gameState.chatId, ui.standoff.result(p1.username, m1, p2.username, m2, outcome), { parse_mode: 'Markdown' });
+    
+    if (loser) { 
+        loser.alive = false; 
+        game.checkWinner(ctx, gameState); 
+    } else {
+        gameState.standoff.round++;
+        p1.lastStandoffMove = m1;
+        p2.lastStandoffMove = m2;
+        setTimeout(() => initStandoffRound(ctx, gameState), 3000);
+    }
+}
+
+module.exports = { kill, shootAction, guess, accuse, standoffChoice, startStandoff, handleReport };
